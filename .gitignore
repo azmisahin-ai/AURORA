@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.local
+
+# Runtime outputs
+workspace/*
+!workspace/.gitkeep
+knowledge/topics/*
+knowledge/sources/*
+knowledge/research/*
+!knowledge/**/.gitkeep
