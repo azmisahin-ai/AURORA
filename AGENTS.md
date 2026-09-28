@@ -210,6 +210,41 @@ into the registry. Two steps because the tool layer needs the manager and the
 manager needs the tool layer; the alternative inverts the ADR 001 dependency
 direction.
 
+## Tasks (Phase 6, ADR 008)
+
+`core/task` keeps a durable record per unit of work: `<taskDir>/<id>.json`,
+written **atomically** (temp file + `rename`). This is the phase's whole point,
+so the atomicity claim is measured, not asserted: rewriting a 2 MB record while
+a concurrent reader parses it yields 0 torn reads with `rename` and ~221 with a
+plain `writeFile` (measured on Node v24.21.0). The test
+`never exposes a torn record to a concurrent reader` fails if the rename is ever
+replaced by an in-place write.
+
+States: `queued`, `running`, `waiting`, `completed`, `failed`, `cancelled`.
+Every legal move is in one table (`TASK_TRANSITIONS`); an illegal move throws
+`TaskTransitionError`, and a plain `update()` cannot perform `running → queued`
+— that is the named `requeue()` operation. Terminal states have no outgoing
+plain transition, so "terminal" means exactly "cannot move by `update`".
+
+`recover()` runs on startup and is **bounded** (ADR 001/006): a `running` task
+goes back to `queued` while attempts remain, and to `failed` when they do not —
+never an infinite requeue. `RecoveryReport` separates `requeued`, `exhausted`
+and `corrupt`; corrupt records are reported and left on disk, not deleted.
+
+`TaskRunner` maps a run outcome to a lifecycle state by an explicit table:
+`completed`→`completed`, `aborted`/`max_verifications`→`waiting`,
+`timeout`/`max_iterations`/`max_tool_calls`→retry (or `failed` when exhausted),
+`error`→`failed`. It depends on a `TaskExecutor` port; `AgentRuntime`
+(`createTaskExecutor`) supplies the adapter, so `core/task` imports no provider.
+
+CLI: `aurora tasks add | list | show | recover | run`. `tasks run` recovers
+first, then drains the queue. `AURORA_TASK_DIR` (default `./tasks`),
+`AURORA_TASK_MAX_ATTEMPTS` (default 3).
+
+**Scope:** one process. Mutations are serialised in-process; there is no
+cross-process lock, and two processes sharing a task directory are not
+supported. Documented rather than papered over with an advisory lock.
+
 ## Test harness note
 
 `vitest.config.ts` sets `fileParallelism: false`. All five live integration

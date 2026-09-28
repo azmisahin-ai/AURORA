@@ -10,7 +10,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
 | 3 | Web Research + Knowledge | Phase 2 | 3–4 gün | ✅ |
 | 4 | Code Execution + Verification | Phase 3 | 3–4 gün | ✅ |
 | 5 | Sub-Agent System | Phase 4 | 3–4 gün | ✅ |
-| 6 | Persistence + Task Recovery | Phase 5 | 2–3 gün | ⬜ |
+| 6 | Persistence + Task Recovery | Phase 5 | 2–3 gün | ✅ |
 | 7 | Context + Memory | Phase 6 | 2–3 gün | ⬜ |
 | 8 | Security Hardening | Phase 7 | 3–4 gün | ⬜ |
 | 9 | CLI + API | Phase 8 | 2–3 gün | ⬜ |
@@ -120,5 +120,36 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
 - [x] Live end-to-end: a real model delegates to a real coder sub-agent that
       writes a real file, asserted on disk and on the trajectory
       (`tests/integration/subagent-live.test.ts`).
+
+> No phase is advanced until the previous phase's acceptance criteria are met.
+
+## Phase 6 acceptance
+
+- [x] A task record is durable: written atomically (temp file + `rename`), so a
+      concurrent reader never observes a torn record. The claim has a test that
+      fails if the rename is replaced by an in-place write
+      (`tests/unit/task/file-task-store.test.ts`).
+- [x] The six states (`queued`, `running`, `waiting`, `completed`, `failed`,
+      `cancelled`) and every legal transition are declared in one table;
+      an illegal move throws rather than silently corrupting the lifecycle.
+- [x] Terminal states have no outgoing plain transitions; reviving a task goes
+      through the named `requeue()` operation only.
+- [x] After a restart, a `running` task is moved back to `queued` and can be
+      restarted — the plan's criterion, verified by constructing a *second*
+      store on the same directory (a real restart, not a flag)
+      (`tests/integration/task-recovery.test.ts`).
+- [x] Recovery is bounded (ADR 001/006): an interrupted task with no attempts
+      left is `failed`, not requeued forever; the two outcomes are reported
+      separately.
+- [x] Corrupt records are reported and left in place, never silently dropped.
+- [x] One poisoned record cannot stall the queue: an exhausted `queued` task is
+      failed and skipped by `claimNext()`.
+- [x] A run outcome maps to a lifecycle state by an explicit table; a
+      resource-bound run retries, an `error` fails, `aborted` and
+      `max_verifications` park in `waiting`.
+- [x] `core/task` imports no provider or concrete tool; it drives work through a
+      `TaskExecutor` port supplied by the composition root (ADR 001).
+- [x] CLI: `tasks add | list | show | recover | run`; `recover` prints the
+      requeued/exhausted/corrupt counts.
 
 > No phase is advanced until the previous phase's acceptance criteria are met.

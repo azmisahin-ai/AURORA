@@ -25,6 +25,24 @@ describe("Config", () => {
     expect(config.testCommand).toBe("");
     expect(config.testTimeoutMs).toBe(300_000);
     expect(config.maxVerifications).toBe(0);
+    // Task persistence (Phase 6).
+    expect(config.taskDir).toBe("./tasks");
+    expect(config.taskMaxAttempts).toBe(3);
+  });
+
+  it("reads task settings from the environment", () => {
+    const config = loadConfig({
+      AURORA_TASK_DIR: "/tmp/jobs",
+      AURORA_TASK_MAX_ATTEMPTS: "5",
+    });
+    expect(config.taskDir).toBe("/tmp/jobs");
+    expect(config.taskMaxAttempts).toBe(5);
+  });
+
+  it("rejects a non-positive task attempt budget", () => {
+    expect(() => loadConfig({ AURORA_TASK_MAX_ATTEMPTS: "0" })).toThrow(
+      /Invalid AURORA configuration/,
+    );
   });
 
   it("reads verification settings from the environment", () => {

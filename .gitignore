@@ -12,3 +12,5 @@ knowledge/topics/*
 knowledge/sources/*
 knowledge/research/*
 !knowledge/**/.gitkeep
+tasks/*
+!tasks/.gitkeep

@@ -8,12 +8,22 @@ import { buildProgram } from "../../src/cli/index.js";
  */
 
 describe("CLI wiring", () => {
-  it("registers run, research and knowledge", () => {
+  it("registers run, research, knowledge and tasks", () => {
     const names = buildProgram()
       .commands.map((c) => c.name());
     expect(names).toContain("run");
     expect(names).toContain("research");
     expect(names).toContain("knowledge");
+    expect(names).toContain("tasks");
+  });
+
+  it("exposes tasks add, list, show, recover and run", () => {
+    const program = buildProgram();
+    const tasks = program.commands.find((c) => c.name() === "tasks")!;
+    const sub = tasks.commands.map((c) => c.name());
+    expect(sub).toEqual(
+      expect.arrayContaining(["add", "list", "show", "recover", "run"]),
+    );
   });
 
   it("exposes knowledge list, search and show", () => {

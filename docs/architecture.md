@@ -81,7 +81,31 @@ parent loop ──delegate(role, task)──▶ SubAgentManager ──▶ role A
 - **Bounded twice** — per-delegation role budget and per-run `maxSubAgents`.
   `AURORA_MAX_SUB_AGENTS=0` disables delegation entirely.
 
-## 4. Memory tiers (Phase 7)
+## 4. Task persistence (Phase 6, ADR 008)
+
+`core/task` keeps a durable record per unit of work: `<taskDir>/<id>.json`,
+written atomically (temp file + `rename`).
+
+```
+TaskStore ── claimNext() ──▶ TaskRunner ── TaskExecutor port ──▶ AgentLoop
+   ▲                              │                                   │
+   └── update/requeue ◀── outcome ┤◀──── RunResult ───────────────────┘
+   └── recover() on restart       │
+```
+
+- **States** — `queued`, `running`, `waiting`, `completed`, `failed`,
+  `cancelled`, with every legal transition in one table. Terminal states have no
+  outgoing plain transition; reviving goes through the named `requeue()`.
+- **Recovery is bounded** — on restart a `running` task returns to `queued`
+  while attempts remain, and is `failed` when they do not. Corrupt records are
+  reported, not deleted.
+- **Outcome mapping** — a resource-bound run (`timeout`, `max_iterations`,
+  `max_tool_calls`) retries; an `error` fails; `aborted` and `max_verifications`
+  park in `waiting`.
+- **Layering holds** — `core/task` drives work through a `TaskExecutor` port;
+  `AgentRuntime` supplies the adapter. No provider import.
+
+## 5. Memory tiers (Phase 7)
 
 | Tier | Scope | Storage |
 |---|---|---|
@@ -89,7 +113,7 @@ parent loop ──delegate(role, task)──▶ SubAgentManager ──▶ role A
 | Session | one conversation | file (JSON) |
 | Knowledge | cross-session | filesystem + metadata |
 
-## 5. Knowledge layout (ADR 002)
+## 6. Knowledge layout (ADR 002)
 
 ```
 knowledge/
@@ -100,7 +124,7 @@ knowledge/
 
 With JSON metadata (`topic`, `source`, `retrievedAt`, `provider`, `verified`).
 
-## 6. Security (ADR 004)
+## 7. Security (ADR 004)
 
 - Untrusted web content wrapped in nonce delimiters, never treated as
   instructions.
@@ -109,9 +133,9 @@ With JSON metadata (`topic`, `source`, `retrievedAt`, `provider`, `verified`).
 - Path traversal, SSRF, and command allowlist/denylist validation.
 - Secret redaction in logs; zod config validation.
 
-## 7. Current build state
+## 8. Current build state
 
-This repository is being built phase by phase. As of the Phase 5 report:
+This repository is being built phase by phase. As of the Phase 6 report:
 
 - **Phase 0** — research docs and ADRs: complete.
 - **Phase 1** — Config, LLM provider interfaces + Ollama/OpenAI-compatible
@@ -123,6 +147,8 @@ This repository is being built phase by phase. As of the Phase 5 report:
   the bounded repair loop: complete.
 - **Phase 5** — role-based sub-agents, context isolation, least-privilege role
   toolsets, delegation as a tool, delegated-edit verification: complete.
+- **Phase 6** — durable tasks: atomic records, checked transitions, bounded
+  restart recovery, `tasks` CLI: complete.
 
 ### Environment constraints observed during the build
 

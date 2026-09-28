@@ -13,7 +13,8 @@ claim either tested or explicitly marked *DOĞRULANACAK*.
 - **Phase 3** — web research + knowledge store: ✅ complete
 - **Phase 4** — code execution + external verification loop: ✅ complete
 - **Phase 5** — sub-agent system (roles, delegation, least privilege): ✅ complete
-- Phases 6–10: not started. See `docs/roadmap.md`.
+- **Phase 6** — persistence + task recovery (durable tasks, restart recovery): ✅ complete
+- Phases 7–10: not started. See `docs/roadmap.md`.
 
 ## Requirements
 
@@ -48,6 +49,8 @@ Key variables:
 | `AURORA_TEST_COMMAND` | — | External check for Phase 4 verification |
 | `AURORA_MAX_VERIFICATIONS` | `0` | Cap on verify→repair attempts; 0 disables |
 | `AURORA_MAX_SUB_AGENTS` | `3` | Cap on sub-agent delegations; 0 disables (Phase 5) |
+| `AURORA_TASK_DIR` | `./tasks` | Durable task record root (Phase 6) |
+| `AURORA_TASK_MAX_ATTEMPTS` | `3` | Attempts before a task is failed rather than requeued |
 
 ## Usage
 
@@ -65,6 +68,12 @@ node dist/cli/index.js run "fix the failing test" \
 
 # Allow role-based sub-agents to be delegated to (Phase 5; default 3, 0 disables)
 node dist/cli/index.js run "implement and test the parser" --max-sub-agents 4
+
+# Durable tasks (Phase 6): queue work, survive a restart, then run it
+node dist/cli/index.js tasks add "summarise the README"
+node dist/cli/index.js tasks list
+node dist/cli/index.js tasks recover    # requeue tasks interrupted by a crash
+node dist/cli/index.js tasks run --max-tasks 3
 
 # Any OpenAI-compatible endpoint
 AURORA_LLM_PROVIDER=openai-compatible \

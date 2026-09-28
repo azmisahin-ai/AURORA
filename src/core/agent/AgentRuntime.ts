@@ -8,6 +8,7 @@ import { CommandVerifier } from "../../providers/execution/CommandVerifier.js";
 import { AgentLoop } from "./AgentLoop.js";
 import type { ToolExecutor, Verifier } from "./types.js";
 import { SubAgentManager, type SubAgentManagerPort } from "./subagent/index.js";
+import type { TaskExecutor } from "../task/TaskRunner.js";
 import { buildToolRegistry } from "../../tools/index.js";
 import { delegateTool } from "../../tools/agent/DelegateTool.js";
 
@@ -83,6 +84,25 @@ export class AgentRuntime {
       },
       logger: this.logger,
     });
+  }
+
+  /**
+   * Adapts the agent loop to the `TaskExecutor` port so `core/task` can drive
+   * persisted work without importing providers (ADR 001). Each task gets a
+   * fresh loop, so no context leaks between tasks.
+   */
+  createTaskExecutor(): TaskExecutor {
+    return {
+      execute: async (task, signal) => {
+        const loop = this.createLoop();
+        const result = await loop.run(task.prompt, signal !== undefined ? { signal } : {});
+        return {
+          status: result.status,
+          output: result.output,
+          ...(result.error !== undefined ? { error: result.error } : {}),
+        };
+      },
+    };
   }
 
   async health(): Promise<boolean> {

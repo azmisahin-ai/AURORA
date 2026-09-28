@@ -19,3 +19,11 @@ export type {
 export { LLMError } from "./providers/llm/LLMProvider.js";
 export { OllamaProvider } from "./providers/llm/ollama/OllamaProvider.js";
 export { OpenAICompatibleProvider } from "./providers/llm/compatible/OpenAICompatibleProvider.js";
+export { FileTaskStore, TaskRunner, nextTaskStatus } from "./core/task/index.js";
+export type {
+  TaskExecutor,
+  TaskRecord,
+  TaskRunOutcome,
+  TaskStatus,
+  TaskStore,
+} from "./core/task/index.js";

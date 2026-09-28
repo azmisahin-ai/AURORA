@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { registerRunCommand } from "./commands/run.js";
 import { registerResearchCommand } from "./commands/research.js";
 import { registerKnowledgeCommand } from "./commands/knowledge.js";
+import { registerTasksCommand } from "./commands/tasks.js";
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -14,6 +15,7 @@ export function buildProgram(): Command {
   registerRunCommand(program);
   registerResearchCommand(program);
   registerKnowledgeCommand(program);
+  registerTasksCommand(program);
   return program;
 }
 

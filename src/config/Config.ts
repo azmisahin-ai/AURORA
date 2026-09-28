@@ -33,6 +33,11 @@ export const ConfigSchema = z.object({
   // (see `core/agent/roles/definitions.ts`).
   maxSubAgents: z.coerce.number().int().min(0).default(3),
 
+  // Task persistence (Phase 6). Where durable task records live and how many
+  // attempts a task gets before it is failed rather than requeued.
+  taskDir: z.string().min(1).default("./tasks"),
+  taskMaxAttempts: z.coerce.number().int().positive().default(3),
+
   // Web research. `noop` means no search backend is configured; research then
   // falls back to fetching known URLs, which is a degraded mode, not an error.
   searchProvider: z.enum(["noop"]).default("noop"),
@@ -92,6 +97,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxVerifications: env.AURORA_MAX_VERIFICATIONS,
 
     maxSubAgents: env.AURORA_MAX_SUB_AGENTS,
+
+    taskDir: env.AURORA_TASK_DIR,
+    taskMaxAttempts: env.AURORA_TASK_MAX_ATTEMPTS,
 
     searchProvider: env.AURORA_SEARCH_PROVIDER,
     fetchTimeoutMs: env.AURORA_FETCH_TIMEOUT_MS,
