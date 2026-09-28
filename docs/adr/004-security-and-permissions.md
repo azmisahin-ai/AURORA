@@ -75,8 +75,25 @@ FULL_ACCESS        → all (used sparingly)
 
 ## Compliance
 
-- Unit tests: `PathValidator` rejects traversal; `UrlValidator` rejects
-  `file://`, `localhost`, `169.254.169.254`.
-- Integration tests: a malicious command is refused; an SSRF attempt is refused;
-  a prompt-injection attempt is marked untrusted and does not alter the system
+Phase 2 (implemented, tested):
+
+- Unit tests: `PathValidator` rejects `../../etc/passwd`, absolute paths outside
+  the root, NUL bytes, and **symlink escapes** (`resolveReal`); `CommandValidator`
+  rejects shell metacharacters and non-allowlisted/always-blocked commands;
+  `PermissionManager` denies and names missing permissions.
+- Integration tests: a tool call lacking its permission is refused **and** the
+  refusal is asserted in real pino output; a malicious command is refused; child
+  processes do not inherit host secrets.
+
+Still pending (Phase 3 / 8):
+
+- `UrlValidator` rejecting `file://`, `localhost`, `169.254.169.254`, and private
+  ranges — `NETWORK_ACCESS` is therefore not granted yet.
+- Nonce-delimited wrapping of tool/web output and its token cap.
+- `SecretRedactor` for logs.
+- A prompt-injection attempt being marked untrusted without altering the system
   instruction.
+
+Note: command execution is `shell: false` with an explicit argv array and a
+minimal environment, so metacharacter rejection is defence in depth rather than
+the only barrier.

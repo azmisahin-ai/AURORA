@@ -20,6 +20,11 @@ export interface ToolExecutor {
     call: ToolCall,
     signal?: AbortSignal,
   ): Promise<ToolExecutionResult>;
+  /**
+   * Tool definitions to offer the model, already filtered to what is permitted.
+   * Optional so a bare executor can be used in tests.
+   */
+  definitions?(): import("../../providers/llm/LLMProvider.js").ToolDefinition[];
 }
 
 export interface AgentLimits {

@@ -53,6 +53,18 @@ npm run test:unit
 
 - **Ollama is not installed in the default build environment.** Do not assume it
   is running. The live integration test skips accordingly.
+- **`$HOME` is ephemeral — `/workspace` is not.** The container's home directory
+  is reset between sessions: anything installed under `~/.local`, `~/.ollama` or
+  logged to `/tmp` is gone on the next session, including a running `ollama
+  serve`. Install tooling and model blobs under `/workspace` instead:
+  - Ollama binary: `/workspace/.tools/ollama/bin/ollama`
+  - Model store: `/workspace/.ollama-models` (`OLLAMA_MODELS`)
+  - Server log: `/workspace/.tools/ollama/serve.log`
+  Start it with:
+  `OLLAMA_HOST=127.0.0.1:11434 OLLAMA_MODELS=/workspace/.ollama-models nohup /workspace/.tools/ollama/bin/ollama serve > /workspace/.tools/ollama/serve.log 2>&1 &`
+  - There is no `zstd` CLI and no `python-zstandard`, but `libzstd.so.1` exists.
+    `/workspace/.tools/zstd-decompress.py` decompresses `.tar.zst` release
+    assets via ctypes; the Ollama release ships only `.tar.zst` for Linux.
 - Network egress works (npm registry, docs.ollama.com reachable).
 - `file_editor` create/write can fail on a directory that does not exist yet —
   `mkdir -p` the parent first.
@@ -62,13 +74,32 @@ npm run test:unit
 ```
 src/core/        agent loop, planner, (later) memory/task/context/errors
 src/providers/   LLM/web/execution adapters implementing owned interfaces
-src/tools/       tool registry and tools (later phases)
-src/security/    path/url/command validation, secret redaction (later)
+src/tools/       tool registry and tools (Phase 2: read/write/list/run_command)
+src/security/    permissions, path/command validation (later: url, redaction)
 src/cli/         commander entry point
 docs/research/   sourced research notes
 docs/adr/        architecture decision records
 knowledge/       runtime knowledge store (gitignored contents)
 ```
+
+## Tool system (Phase 2)
+
+`Tool` (`src/tools/types.ts`) carries a **zod** `inputSchema` that is the single
+source of truth: `ToolRegistry.definitions()` derives the JSON Schema offered to
+the model from it and `execute()` validates arguments against the same schema.
+
+`ToolRegistry` implements the loop's `ToolExecutor` port, so `core` still imports
+no tool code. It enforces, in order: known tool → permissions → schema →
+execution. A denied call is logged and returned to the model as unavailable; the
+model cannot argue past the gate.
+
+Permissions (`src/security/PermissionManager.ts`): `READ_ONLY`,
+`WORKSPACE_WRITE`, `COMMAND_EXECUTION`, `NETWORK_ACCESS`, `FULL_ACCESS`.
+`NETWORK_ACCESS` is deliberately withheld until Phase 3 adds URL validation.
+
+`LocalExecutionProvider` runs commands with `shell: false` and a minimal
+environment (no inherited secrets). `CommandValidator` rejects shell
+metacharacters and non-allowlisted commands before execution.
 
 ## Current provider surface
 

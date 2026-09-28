@@ -71,7 +71,12 @@ export class AgentLoop {
         // ── reason ──────────────────────────────────────────────────────────
         let turn;
         try {
-          turn = await llm.chat({ messages, signal: controller.signal });
+          const offeredTools = tools?.definitions?.() ?? [];
+          turn = await llm.chat({
+            messages,
+            ...(offeredTools.length > 0 ? { tools: offeredTools } : {}),
+            signal: controller.signal,
+          });
         } catch (cause) {
           if (cause instanceof LLMError && controller.signal.aborted) {
             return finish(Date.now() >= deadline ? "timeout" : "aborted");

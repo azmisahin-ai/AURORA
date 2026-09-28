@@ -6,6 +6,7 @@ import { OpenAICompatibleProvider } from "../../providers/llm/compatible/OpenAIC
 import type { LLMProvider } from "../../providers/llm/LLMProvider.js";
 import { AgentLoop } from "./AgentLoop.js";
 import type { ToolExecutor } from "./types.js";
+import { buildToolRegistry } from "../../tools/index.js";
 
 export interface RuntimeOptions {
   config?: Config;
@@ -24,20 +25,20 @@ export class AgentRuntime {
   readonly config: Config;
   readonly llm: LLMProvider;
   readonly logger: Logger;
-  private readonly tools?: ToolExecutor;
+  private readonly tools: ToolExecutor;
 
   constructor(opts: RuntimeOptions = {}) {
     this.config = opts.config ?? loadConfig();
     this.logger = opts.logger ?? createLogger(this.config.logLevel);
     this.llm = opts.llm ?? createLLMProvider(this.config);
-    if (opts.tools) this.tools = opts.tools;
+    this.tools = opts.tools ?? buildToolRegistry({ config: this.config, logger: this.logger });
   }
 
   createLoop(): AgentLoop {
     return new AgentLoop({
       llm: this.llm,
       planner: new Planner(),
-      ...(this.tools ? { tools: this.tools } : {}),
+      tools: this.tools,
       limits: {
         maxIterations: this.config.maxIterations,
         maxToolCalls: this.config.maxToolCalls,
