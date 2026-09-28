@@ -20,6 +20,27 @@ describe("Config", () => {
     expect(config.fetchTimeoutMs).toBe(30_000);
     expect(config.fetchMaxBytes).toBe(5 * 1024 * 1024);
     expect(config.untrustedMaxChars).toBe(32_000);
+    // Verification is opt-in: no test command and no budget by default means
+    // Phase 4 changes nothing unless a project configures it.
+    expect(config.testCommand).toBe("");
+    expect(config.testTimeoutMs).toBe(300_000);
+    expect(config.maxVerifications).toBe(0);
+  });
+
+  it("reads verification settings from the environment", () => {
+    const config = loadConfig({
+      AURORA_TEST_COMMAND: "npm test",
+      AURORA_TEST_TIMEOUT_MS: "45000",
+      AURORA_MAX_VERIFICATIONS: "3",
+    });
+    expect(config.testCommand).toBe("npm test");
+    expect(config.testTimeoutMs).toBe(45_000);
+    expect(config.maxVerifications).toBe(3);
+  });
+
+  it("defaults the LLM model to a concrete value but reads it from env", () => {
+    expect(loadConfig({}).model).toBe("llama3.2");
+    expect(loadConfig({ AURORA_MODEL: "qwen3.5:4b" }).model).toBe("qwen3.5:4b");
   });
 
   it("reads web-research settings from the environment", () => {

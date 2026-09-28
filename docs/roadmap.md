@@ -71,3 +71,28 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
       from the terminal.
 
 > No phase is advanced until the previous phase's acceptance criteria are met.
+
+## Phase 4 acceptance
+
+- [x] Failure classification covers transient/configuration/authentication/
+      network/code/validation/permission/unknown, with an action per class
+      (`tests/unit/errors/error-classifier.test.ts`).
+- [x] Retry is **bounded**: `maxVerifications` caps the verify→repair loop, and
+      exhausting it ends the run as `max_verifications`, never `completed`
+      (`tests/unit/agent/verification.test.ts` § "escalates").
+- [x] Verification runs on an **external signal** — a real process exit code —
+      not the model's self-assessment (ADR 001/006).
+- [x] The gate fires only after a workspace-mutating tool **succeeded**; a
+      failed write and a non-mutating tool do not trigger it.
+- [x] A `skipped` check is never reported as a pass, and the CLI prints
+      `completed WITHOUT verification`.
+- [x] Exit code 0 alone is not a pass: a vacuous `node --test` run (0 test
+      files, exit 0 on Node v24.21.0) is treated as failure.
+- [x] `run_tests` runs a real suite and reports the verdict from the exit code;
+      the model-facing tool and the loop-trusted verifier share one parser.
+- [x] Live end-to-end: the loop writes a red suite, the verifier rejects the
+      completion, the model repairs it, and the green run is accepted —
+      asserted against real processes (`tests/integration/verification-live.test.ts`).
+- [x] Verification is opt-in; defaults preserve Phase 1–3 behaviour.
+
+> No phase is advanced until the previous phase's acceptance criteria are met.

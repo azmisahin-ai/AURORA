@@ -4,14 +4,16 @@ import { Planner } from "../planner/Planner.js";
 import { OllamaProvider } from "../../providers/llm/ollama/OllamaProvider.js";
 import { OpenAICompatibleProvider } from "../../providers/llm/compatible/OpenAICompatibleProvider.js";
 import type { LLMProvider } from "../../providers/llm/LLMProvider.js";
+import { CommandVerifier } from "../../providers/execution/CommandVerifier.js";
 import { AgentLoop } from "./AgentLoop.js";
-import type { ToolExecutor } from "./types.js";
+import type { ToolExecutor, Verifier } from "./types.js";
 import { buildToolRegistry } from "../../tools/index.js";
 
 export interface RuntimeOptions {
   config?: Config;
   llm?: LLMProvider;
   tools?: ToolExecutor;
+  verifier?: Verifier;
   logger?: Logger;
 }
 
@@ -25,14 +27,19 @@ export class AgentRuntime {
   readonly config: Config;
   readonly llm: LLMProvider;
   readonly logger: Logger;
+  readonly verifier?: Verifier;
   private readonly tools: ToolExecutor;
 
   constructor(opts: RuntimeOptions = {}) {
     this.config = opts.config ?? loadConfig();
     this.logger = opts.logger ?? createLogger(this.config.logLevel);
     this.llm = opts.llm ?? createLLMProvider(this.config);
-    this.tools =
-      opts.tools ?? buildToolRegistry({ config: this.config, logger: this.logger }).registry;
+    const built = buildToolRegistry({
+      config: this.config,
+      logger: this.logger,
+    });
+    this.tools = opts.tools ?? built.registry;
+    this.verifier = opts.verifier ?? createVerifier(this.config, built, this.logger);
   }
 
   createLoop(): AgentLoop {
@@ -40,10 +47,12 @@ export class AgentRuntime {
       llm: this.llm,
       planner: new Planner(),
       tools: this.tools,
+      ...(this.verifier !== undefined ? { verifier: this.verifier } : {}),
       limits: {
         maxIterations: this.config.maxIterations,
         maxToolCalls: this.config.maxToolCalls,
         timeoutMs: this.config.timeoutMs,
+        maxVerifications: this.config.maxVerifications,
       },
       logger: this.logger,
     });
@@ -53,6 +62,28 @@ export class AgentRuntime {
     if (!this.llm.health) return false;
     return this.llm.health();
   }
+}
+
+/**
+ * Builds the external verifier only when a test command is configured *and*
+ * verification is enabled. Returns undefined otherwise, so a run with no
+ * verification behaves exactly as before Phase 4.
+ */
+function createVerifier(
+  config: Config,
+  built: ReturnType<typeof buildToolRegistry>,
+  logger: Logger,
+): Verifier | undefined {
+  if (config.testCommand.trim() === "" || config.maxVerifications <= 0) return undefined;
+  return new CommandVerifier({
+    command: config.testCommand,
+    execution: built.execution,
+    commandValidator: built.commandValidator,
+    permissions: built.permissions,
+    cwd: built.workspace,
+    timeoutMs: config.testTimeoutMs,
+    logger,
+  });
 }
 
 function createLLMProvider(config: Config): LLMProvider {

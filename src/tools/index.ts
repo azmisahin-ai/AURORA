@@ -15,6 +15,7 @@ import { readFileTool } from "./filesystem/ReadFileTool.js";
 import { writeFileTool } from "./filesystem/WriteFileTool.js";
 import { listFilesTool } from "./filesystem/ListFilesTool.js";
 import { runCommandTool } from "./execution/RunCommandTool.js";
+import { runTestsTool } from "./execution/RunTestsTool.js";
 import { webFetchTool } from "./web/WebFetchTool.js";
 import { webSearchTool } from "./web/WebSearchTool.js";
 import { knowledgeWriteTool } from "./knowledge/KnowledgeWriteTool.js";
@@ -48,6 +49,16 @@ export interface BuiltTools {
   registry: ToolRegistry;
   knowledge: KnowledgeStore;
   search: SearchProvider;
+  /**
+   * Security/execution pieces the runtime needs to build the verifier. Exposed
+   * rather than rebuilt so the verifier and the tools share one permission
+   * grant and one command policy — a verifier that used a different allowlist
+   * than `run_tests` would be a silent inconsistency.
+   */
+  commandValidator: CommandValidator;
+  permissions: PermissionManager;
+  execution: LocalExecutionProvider;
+  workspace: string;
 }
 
 export function buildToolRegistry(opts: BuildToolRegistryOptions): BuiltTools {
@@ -71,13 +82,14 @@ export function buildToolRegistry(opts: BuildToolRegistryOptions): BuiltTools {
 
   const knowledge = opts.knowledgeStore ?? new FileKnowledgeStore(opts.config.knowledgeDir);
   const search = opts.searchProvider ?? createSearchProvider(opts);
+  const execution = new LocalExecutionProvider();
 
   const registry = new ToolRegistry({
     permissions,
     workspace,
     pathValidator,
     commandValidator,
-    execution: new LocalExecutionProvider(),
+    execution,
     logger: opts.logger,
   }).registerAll([
     readFileTool,
@@ -90,7 +102,27 @@ export function buildToolRegistry(opts: BuildToolRegistryOptions): BuiltTools {
     knowledgeSearchTool(knowledge),
   ]);
 
-  return { registry, knowledge, search };
+  // The test tool is how the model checks its own work; it only exists when a
+  // test command is configured. Without one there is nothing to run, and
+  // offering a tool that always fails would be worse than omitting it.
+  if (opts.config.testCommand.trim() !== "") {
+    registry.register(
+      runTestsTool({
+        command: opts.config.testCommand,
+        defaultTimeoutMs: opts.config.testTimeoutMs,
+      }),
+    );
+  }
+
+  return {
+    registry,
+    knowledge,
+    search,
+    commandValidator,
+    permissions,
+    execution,
+    workspace,
+  };
 }
 
 /**

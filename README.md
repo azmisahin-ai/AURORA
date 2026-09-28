@@ -9,7 +9,10 @@ claim either tested or explicitly marked *DOĞRULANACAK*.
 
 - **Phase 0** — research + ADRs: ✅ complete (`docs/research/`, `docs/adr/`)
 - **Phase 1** — core agent loop + CLI + LLM providers: ✅ complete
-- Phases 2–10: not started. See `docs/roadmap.md`.
+- **Phase 2** — tool system + permissions: ✅ complete
+- **Phase 3** — web research + knowledge store: ✅ complete
+- **Phase 4** — code execution + external verification loop: ✅ complete
+- Phases 5–10: not started. See `docs/roadmap.md`.
 
 ## Requirements
 
@@ -52,6 +55,10 @@ node dist/cli/index.js run "Merhaba de"
 # Override per-invocation
 node dist/cli/index.js run "Node.js hakkında araştırma yap" --max-iterations 10
 
+# Require an external check before the run may report success (Phase 4)
+node dist/cli/index.js run "fix the failing test" \
+  --test-command "npm test" --max-verifications 3
+
 # Any OpenAI-compatible endpoint
 AURORA_LLM_PROVIDER=openai-compatible \
 OPENAI_COMPATIBLE_BASE_URL=http://localhost:1234/v1 \
@@ -89,10 +96,15 @@ provider. Decisions are recorded in `docs/adr/`.
 
 ## Security posture
 
-Web content is treated as `UNTRUSTED DATA`, never as instructions, and will be
-wrapped in nonce-delimited markers once the web tools land (Phase 3). Prompt
-injection is **not** claimed to be solved — the goal is defense-in-depth and
-auditability. See `docs/research/security.md` and `docs/adr/004`.
+Web content is treated as `UNTRUSTED DATA`, never as instructions, and is
+wrapped in nonce-delimited markers (Phase 3). Prompt injection is **not** claimed
+to be solved — the goal is defense-in-depth and auditability. See
+`docs/research/security.md` and `docs/adr/004`.
+
+After the agent changes the workspace, it may not report success unless an
+**external** check (a real process exit code) agreed; the verify→repair loop is
+bounded and escalates when the bound is hit (Phase 4, `docs/adr/006`). A check
+that could not run is reported as `skipped`, never as a pass.
 
 ## Adding knowledge for future sessions
 

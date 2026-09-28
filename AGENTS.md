@@ -48,11 +48,15 @@ npm run test:unit
   Env switches: `AURORA_TEST_OLLAMA=0|1`.
 - Test doubles are acceptable only at genuine I/O boundaries (network, process);
   do not mock internal functions.
+- **`node --test` exits 0 when it finds no test files** (Node v24.21.0 — verify
+  with a probe before trusting any assumption about runner exit codes). Anything
+  that treats exit 0 as "tests passed" must also check that tests actually ran;
+  see `ranNoTests` in `TestSummary.ts`.
 
 ## Environment quirks
 
-- **Ollama is not installed in the default build environment.** Do not assume it
-  is running. The live integration test skips accordingly.
+- **Ollama may or may not be installed.** Do not assume it is running; the live
+  integration test skips (and prints why) when it is unreachable.
 - **`$HOME` is ephemeral — `/workspace` is not.** The container's home directory
   is reset between sessions: anything installed under `~/.local`, `~/.ollama` or
   logged to `/tmp` is gone on the next session, including a running `ollama
@@ -72,9 +76,9 @@ npm run test:unit
 ## Layout
 
 ```
-src/core/        agent loop, planner, (later) memory/task/context/errors
+src/core/        agent loop, planner, errors (later: memory/task/context)
 src/providers/   LLM/web/execution adapters implementing owned interfaces
-src/tools/       tool registry and tools (Phase 2: read/write/list/run_command)
+src/tools/       tool registry and tools (Phase 2: read/write/list/run_command, Phase 4: run_tests)
 src/security/    permissions, path/command validation (later: url, redaction)
 src/cli/         commander entry point
 docs/research/   sourced research notes
@@ -137,3 +141,33 @@ content is treated as untrusted on the way back out.
 
 Tools: `web_fetch`, `web_search`, `knowledge_write`, `knowledge_search`.
 `web_fetch`/`web_search` require `NETWORK_ACCESS`.
+
+## Code execution + verification (Phase 4)
+
+The loop's success signal is **external** (ADR 001/006). `Verifier`
+(`src/core/agent/types.ts`) returns a verdict derived from a process exit code;
+`CommandVerifier` runs one configured command (`AURORA_TEST_COMMAND`). Core never
+learns how the verdict was produced.
+
+The completion gate (`AgentLoop.gateCompletion`) rules, in order:
+
+1. No verifier, or `maxVerifications = 0` → accept (Phase 1–3 behaviour).
+2. Nothing was mutated → accept, without running the verifier.
+3. Budget exhausted → `max_verifications`, escalate; never accept.
+4. Run the verifier: `pass` accepts; `fail` feeds back the failure **and its
+   classification** and the loop repairs. `skipped` accepts but is recorded —
+   never reported as a pass.
+
+A tool declares `mutatesWorkspace: true`; `ToolRegistry` sets
+`mutatedWorkspace` on the result **only when the call succeeded**. `write_file`
+sets it; `knowledge_write` (not code) and `run_command` (the verifier's own tool)
+do not. Core never infers this from tool names.
+
+`ErrorClassifier` (`src/core/errors/`) maps a failure to a category + action.
+Structured signals beat text (`status: 401` over a message saying "invalid");
+`AbortError` is transient but not retryable.
+
+`run_tests` is registered only when a test command exists, and shares one command,
+policy, and parser with the verifier (`TestSummary.ts`) so the model's view and
+the gate's view cannot drift. Exit 0 is necessary but **not sufficient**: a
+vacuous run is a failure (`ranNoTests`).

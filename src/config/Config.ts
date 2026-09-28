@@ -20,6 +20,13 @@ export const ConfigSchema = z.object({
   timeoutMs: z.coerce.number().int().positive().default(120_000),
   tokenBudget: z.coerce.number().int().positive().default(100_000),
 
+  // Verification (Phase 4). The external check is a command; when unset, no
+  // verifier is built and completion is accepted as-is (pre-Phase-4 behaviour).
+  // `maxVerifications` bounds the verify→repair loop; 0 disables it.
+  testCommand: z.string().default(""),
+  testTimeoutMs: z.coerce.number().int().positive().default(300_000),
+  maxVerifications: z.coerce.number().int().min(0).default(0),
+
   // Web research. `noop` means no search backend is configured; research then
   // falls back to fetching known URLs, which is a degraded mode, not an error.
   searchProvider: z.enum(["noop"]).default("noop"),
@@ -73,6 +80,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxToolCalls: env.AURORA_MAX_TOOL_CALLS,
     timeoutMs: env.AURORA_TIMEOUT_MS,
     tokenBudget: env.AURORA_TOKEN_BUDGET,
+
+    testCommand: env.AURORA_TEST_COMMAND,
+    testTimeoutMs: env.AURORA_TEST_TIMEOUT_MS,
+    maxVerifications: env.AURORA_MAX_VERIFICATIONS,
 
     searchProvider: env.AURORA_SEARCH_PROVIDER,
     fetchTimeoutMs: env.AURORA_FETCH_TIMEOUT_MS,

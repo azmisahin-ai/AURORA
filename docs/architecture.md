@@ -45,11 +45,15 @@ observe → reason → plan → execute → verify → (repeat until done | boun
 - **reason**: call `LLMProvider.chat` / `.stream`.
 - **plan**: `Planner.update(reasoning)` → next step or completion.
 - **execute**: select and run a tool (permission-checked).
-- **verify**: Reflexion step. Uses an **external signal** only (test/lint/build
-  output). Never the model's bare self-assessment.
+- **verify**: the completion gate (`AgentLoop.gateCompletion`). Fires **only**
+  when a tool declaring `mutatesWorkspace` succeeded this run, and only when a
+  `Verifier` is configured. It reads an **external signal** — a process exit code
+  — never the model's bare self-assessment. A failing check feeds its
+  classification back for repair; exhausting `maxVerifications` escalates with
+  status `max_verifications`.
 
-Bounded by `maxIterations`, `maxToolCalls`, and `AURORA_TIMEOUT_MS`. On bound
-exhaustion: escalate (report + stop).
+Bounded by `maxIterations`, `maxToolCalls`, `maxVerifications`, and
+`AURORA_TIMEOUT_MS`. On bound exhaustion: escalate (report + stop).
 
 ## 3. Memory tiers (Phase 7)
 
@@ -81,19 +85,25 @@ With JSON metadata (`topic`, `source`, `retrievedAt`, `provider`, `verified`).
 
 ## 6. Current build state
 
-This repository is being built phase by phase. As of the Phase 0/1 report:
+This repository is being built phase by phase. As of the Phase 4 report:
 
 - **Phase 0** — research docs and ADRs: complete.
 - **Phase 1** — Config, LLM provider interfaces + Ollama/OpenAI-compatible
-  providers, `AgentLoop`, `AgentRuntime`, `Planner`, CLI: see the phase report.
+  providers, `AgentLoop`, `AgentRuntime`, `Planner`, CLI: complete.
+- **Phase 2** — tool system, permissions, path/command validation: complete.
+- **Phase 3** — web research, SSRF containment, untrusted-data wrapping,
+  knowledge store: complete.
+- **Phase 4** — code execution, error classification, external verification and
+  the bounded repair loop: complete.
 
 ### Environment constraints observed during the build
 
 - Node.js v24.21.0, npm 11.19.1.
-- **Ollama is not installed and not running in this environment.** Any test that
-  requires a live Ollama is skipped and reported as SKIP. Unit tests use a real
-  local HTTP server (not a mocked provider) to exercise the HTTP/NDJSON code
-  paths.
+- **Ollama may or may not be present.** Live-provider tests skip (and say so)
+  when it is unreachable. Unit tests use a real local HTTP server (not a mocked
+  provider) to exercise the HTTP/NDJSON code paths.
+- **`node --test` exits 0 when it matches no test files** (verified on Node
+  v24.21.0). Verification treats that vacuous run as failure; see `ranNoTests`.
 - Network egress works (npm registry and docs.ollama.com reachable), so research
   was performed live rather than from memory.
 

@@ -14,6 +14,7 @@ export const writeFileTool = defineTool({
     content: z.string().describe("Full file contents to write"),
   }),
   requiredPermissions: ["WORKSPACE_WRITE"] as const,
+  mutatesWorkspace: true,
   async execute(input, ctx) {
     const bytes = Buffer.byteLength(input.content, "utf8");
     if (bytes > MAX_BYTES) {

@@ -1,5 +1,6 @@
 import type { ChatMessage, LLMProvider, ToolCall } from "../../providers/llm/LLMProvider.js";
 import type { PlanStep } from "../planner/types.js";
+import type { ExecutionFailure } from "../errors/types.js";
 
 export interface ToolExecutionResult {
   ok: boolean;
@@ -7,6 +8,12 @@ export interface ToolExecutionResult {
   observation: string;
   /** True when the failure should not be retried by the loop. */
   fatal?: boolean;
+  /**
+   * True when this call changed workspace state. Set by the tool layer from the
+   * tool's declared `mutatesWorkspace`; the loop uses it to decide whether an
+   * external verification is warranted.
+   */
+  mutatedWorkspace?: boolean;
 }
 
 /**
@@ -31,12 +38,43 @@ export interface AgentLimits {
   maxIterations: number;
   maxToolCalls: number;
   timeoutMs: number;
+  /**
+   * Hard cap on verification attempts within one run. Omitted or 0 disables
+   * verification entirely, which is the pre-Phase-4 behaviour.
+   */
+  maxVerifications?: number;
+}
+
+/**
+ * An *external* verification signal (ADR 001). The loop asks the verifier to
+ * run a real check after an edit and reports the outcome; the verifier never
+ * consults the model's opinion.
+ *
+ * Deliberately separate from `ToolExecutor`: verifying with the same tools the
+ * agent is preparing to use would let a bad edit invalidate its own grader.
+ */
+export interface Verifier {
+  /** Human-readable check name, e.g. "npm test". */
+  readonly name: string;
+  verify(signal?: AbortSignal): Promise<VerificationOutcome>;
+}
+
+export interface VerificationOutcome {
+  /** "pass" means the external check succeeded (exit 0). */
+  kind: "pass" | "fail" | "skipped";
+  /** Full, redaction-aware description for the trajectory/log. */
+  observation: string;
+  /** Present on "fail"; the raw execution result, for classification. */
+  evidence?: ExecutionFailure;
+  /** Why the check was skipped instead of run (e.g. tool not permitted). */
+  reason?: string;
 }
 
 export type RunStatus =
   | "completed"
   | "max_iterations"
   | "max_tool_calls"
+  | "max_verifications"
   | "timeout"
   | "aborted"
   | "error";
@@ -47,6 +85,8 @@ export interface TrajectoryEntry {
   assistantContent: string;
   toolCall?: ToolCall;
   toolResult?: ToolExecutionResult;
+  /** Present when the entry records a verification attempt. */
+  verification?: VerificationOutcome;
 }
 
 export interface RunResult {
@@ -56,6 +96,10 @@ export interface RunResult {
   toolCalls: number;
   trajectory: TrajectoryEntry[];
   error?: string;
+  /** How many external verification attempts were made in this run. */
+  verifications?: number;
+  /** The last verification outcome, if any. */
+  lastVerification?: VerificationOutcome;
 }
 
 export interface AgentLoopDeps {
@@ -64,9 +108,17 @@ export interface AgentLoopDeps {
   planner: { update(ctx: import("../planner/types.js").PlanContext): PlanStep };
   /** Optional in Phase 1; required once tools exist. */
   tools?: ToolExecutor;
+  /**
+   * Optional external verifier. When present *and* `limits.maxVerifications`
+   * is set, the loop runs it after the model claims completion; a failing
+   * signal is fed back for repair instead of accepting the answer (ADR 001).
+   */
+  verifier?: Verifier;
   systemPrompt?: string;
   limits: AgentLimits;
   logger?: import("pino").Logger;
+  /** Classifies verification failures. Defaults to the built-in classifier. */
+  classifier?: import("../errors/ErrorClassifier.js").ErrorClassifier;
 }
 
 export interface RunOptions {

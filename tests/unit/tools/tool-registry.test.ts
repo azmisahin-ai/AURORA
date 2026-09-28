@@ -107,6 +107,38 @@ describe("ToolRegistry.definitions", () => {
   });
 });
 
+describe("ToolRegistry — mutatesWorkspace propagation", () => {
+  const editor = defineTool({
+    name: "editor",
+    description: "Declares a workspace mutation",
+    inputSchema: z.object({ ok: z.boolean() }),
+    requiredPermissions: ["READ_ONLY"] as const,
+    mutatesWorkspace: true,
+    async execute(input) {
+      return { ok: input.ok, output: input.ok ? "wrote" : "refused" };
+    },
+  });
+
+  it("sets mutatedWorkspace only on a successful declared-mutating call", async () => {
+    const r = registry(["READ_ONLY"]).register(editor);
+    const ok = await r.execute({ name: "editor", arguments: { ok: true } });
+    expect(ok.mutatedWorkspace).toBe(true);
+  });
+
+  it("does not set mutatedWorkspace when the mutating tool reports failure", async () => {
+    const r = registry(["READ_ONLY"]).register(editor);
+    const failed = await r.execute({ name: "editor", arguments: { ok: false } });
+    expect(failed.ok).toBe(false);
+    expect(failed.mutatedWorkspace).toBeUndefined();
+  });
+
+  it("does not set mutatedWorkspace for a non-declaring tool", async () => {
+    const r = registry(["READ_ONLY"]).register(echoTool);
+    const out = await r.execute({ name: "echo_tool", arguments: { value: "hi" } });
+    expect(out.mutatedWorkspace).toBeUndefined();
+  });
+});
+
 describe("ToolRegistry.execute — permission gate", () => {
   it("denies a tool whose permissions are missing and says which", async () => {
     const r = registry(["READ_ONLY"]).register(writeishTool);

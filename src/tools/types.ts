@@ -37,6 +37,17 @@ export interface Tool<S extends z.ZodType = z.ZodType> {
   readonly description: string;
   readonly inputSchema: S;
   readonly requiredPermissions: readonly Permission[];
+  /**
+   * True when a successful call can change the *workspace* (the code under
+   * development). The loop only invokes an external verifier after such a call,
+   * so pure research is never subjected to a code test (ADR 006).
+   *
+   * Deliberately narrow: knowledge writes and `run_command` do not set this.
+   * A knowledge entry is not code, and `run_command` is ambiguous — it is the
+   * very tool a test verifier executes, so treating it as a mutation would make
+   * verification trigger itself.
+   */
+  readonly mutatesWorkspace?: boolean;
   execute(input: z.infer<S>, ctx: ToolContext): Promise<ToolResult>;
 }
 

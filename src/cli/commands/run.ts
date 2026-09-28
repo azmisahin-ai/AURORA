@@ -7,6 +7,8 @@ export interface RunCommandOptions {
   maxIterations?: string;
   model?: string;
   provider?: string;
+  testCommand?: string;
+  maxVerifications?: string;
 }
 
 export function registerRunCommand(program: Command): void {
@@ -17,11 +19,15 @@ export function registerRunCommand(program: Command): void {
     .option("--max-iterations <n>", "override AURORA_MAX_ITERATIONS")
     .option("--model <name>", "override AURORA_MODEL")
     .option("--provider <name>", "override AURORA_LLM_PROVIDER (ollama|openai-compatible)")
+    .option("--test-command <cmd>", "external check run before accepting completion (Phase 4)")
+    .option("--max-verifications <n>", "cap on verify→repair attempts; 0 disables")
     .action(async (task: string, options: RunCommandOptions) => {
       const env = { ...process.env };
       if (options.maxIterations) env.AURORA_MAX_ITERATIONS = options.maxIterations;
       if (options.model) env.AURORA_MODEL = options.model;
       if (options.provider) env.AURORA_LLM_PROVIDER = options.provider;
+      if (options.testCommand) env.AURORA_TEST_COMMAND = options.testCommand;
+      if (options.maxVerifications) env.AURORA_MAX_VERIFICATIONS = options.maxVerifications;
 
       const config = loadConfig(env);
       const logger = createLogger(config.logLevel);
@@ -59,6 +65,12 @@ export function registerRunCommand(program: Command): void {
             "\n",
         );
         process.exitCode = 1;
+      } else if (result.lastVerification?.kind === "skipped") {
+        // The run "completed", but the external check never ran. Say so rather
+        // than let a green status imply the work was verified.
+        process.stderr.write(
+          `aurora: completed WITHOUT verification (${result.lastVerification.reason ?? "skipped"}).\n`,
+        );
       }
     });
 }

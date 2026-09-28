@@ -140,6 +140,7 @@ export class ToolRegistry implements ToolExecutor {
         ok: result.ok,
         observation: result.output,
         ...(result.fatal !== undefined ? { fatal: result.fatal } : {}),
+        ...(result.ok && tool.mutatesWorkspace === true ? { mutatedWorkspace: true } : {}),
       };
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
