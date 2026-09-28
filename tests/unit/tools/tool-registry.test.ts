@@ -137,6 +137,38 @@ describe("ToolRegistry — mutatesWorkspace propagation", () => {
     const out = await r.execute({ name: "echo_tool", arguments: { value: "hi" } });
     expect(out.mutatedWorkspace).toBeUndefined();
   });
+
+  // The declared flag is static; a tool like `delegate` cannot know at
+  // registration time whether the sub-agent it runs will edit. It reports the
+  // change dynamically, and the registry must honour that — otherwise a
+  // delegated edit would silently skip the parent's external verifier.
+  const indirect = defineTool({
+    name: "indirect",
+    description: "Not declared as mutating; reports a change it caused",
+    inputSchema: z.object({ ok: z.boolean() }),
+    requiredPermissions: ["READ_ONLY"] as const,
+    async execute(input) {
+      return {
+        ok: input.ok,
+        output: input.ok ? "delegated an edit" : "delegation failed",
+        ...(input.ok ? { mutatedWorkspace: true } : {}),
+      };
+    },
+  });
+
+  it("honours a mutation a non-declaring tool reports dynamically", async () => {
+    const r = registry(["READ_ONLY"]).register(indirect);
+    const out = await r.execute({ name: "indirect", arguments: { ok: true } });
+    expect(out.ok).toBe(true);
+    expect(out.mutatedWorkspace).toBe(true);
+  });
+
+  it("does not set mutatedWorkspace when the dynamic report accompanies a failure", async () => {
+    const r = registry(["READ_ONLY"]).register(indirect);
+    const out = await r.execute({ name: "indirect", arguments: { ok: false } });
+    expect(out.ok).toBe(false);
+    expect(out.mutatedWorkspace).toBeUndefined();
+  });
 });
 
 describe("ToolRegistry.execute — permission gate", () => {

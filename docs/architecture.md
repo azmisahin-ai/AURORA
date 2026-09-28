@@ -15,8 +15,9 @@ Dependency direction is strictly inward:
         └───────────────┬────────────────────────────┘
                         │
         ┌───────────────▼────────────────────────────┐
-        │                  tools                      │  Phases 2–4
-        │  (web, filesystem, execution, knowledge)    │
+        │                  tools                      │  Phases 2–5
+        │  (web, filesystem, execution, knowledge,    │
+        │   agent/delegate)                           │
         └───────────────┬────────────────────────────┘
                         │
         ┌───────────────▼────────────────────────────┐
@@ -28,7 +29,7 @@ Dependency direction is strictly inward:
         ┌───────────────▼────────────────────────────┐
         │                  core                       │  Phases 1,5,6,7
         │  agent │ planner │ memory │ knowledge │     │
-        │  task │ context │ errors                    │
+        │  task │ context │ errors │ subagent/roles   │
         └────────────────────────────────────────────┘
 ```
 
@@ -55,7 +56,32 @@ observe → reason → plan → execute → verify → (repeat until done | boun
 Bounded by `maxIterations`, `maxToolCalls`, `maxVerifications`, and
 `AURORA_TIMEOUT_MS`. On bound exhaustion: escalate (report + stop).
 
-## 3. Memory tiers (Phase 7)
+## 3. Sub-agents (Phase 5, ADR 007)
+
+`delegate` is a tool, so a delegation is visible in the trajectory. It stands up
+a `SubAgentManager` (core), which runs a role-scoped `AgentLoop` with the role's
+own system prompt, tool subset, and budget.
+
+```
+parent loop ──delegate(role, task)──▶ SubAgentManager ──▶ role AgentLoop
+      ▲                                                        │
+      └──────────── result (UNTRUSTED DATA) ◀──────────────────┘
+```
+
+- **Context isolation** — a sub-agent sees its role prompt and the task, never
+  the parent's transcript.
+- **Least privilege, structurally** — a role's registry is built from its tool
+  list intersected with the parent's grant; a tool the role cannot afford is
+  absent, not denied at call time. `FULL_ACCESS` never propagates.
+- **No recursion** — `delegate` is not in any role's registry, so a sub-agent
+  cannot reach it. Bounded by construction, not by a depth counter.
+- **Delegated edits are verified** — a sub-agent that changed the workspace
+  reports `mutatedWorkspace` dynamically, so the parent's Phase 4 verifier still
+  runs before the answer is accepted.
+- **Bounded twice** — per-delegation role budget and per-run `maxSubAgents`.
+  `AURORA_MAX_SUB_AGENTS=0` disables delegation entirely.
+
+## 4. Memory tiers (Phase 7)
 
 | Tier | Scope | Storage |
 |---|---|---|
@@ -63,7 +89,7 @@ Bounded by `maxIterations`, `maxToolCalls`, `maxVerifications`, and
 | Session | one conversation | file (JSON) |
 | Knowledge | cross-session | filesystem + metadata |
 
-## 4. Knowledge layout (ADR 002)
+## 5. Knowledge layout (ADR 002)
 
 ```
 knowledge/
@@ -74,7 +100,7 @@ knowledge/
 
 With JSON metadata (`topic`, `source`, `retrievedAt`, `provider`, `verified`).
 
-## 5. Security (ADR 004)
+## 6. Security (ADR 004)
 
 - Untrusted web content wrapped in nonce delimiters, never treated as
   instructions.
@@ -83,9 +109,9 @@ With JSON metadata (`topic`, `source`, `retrievedAt`, `provider`, `verified`).
 - Path traversal, SSRF, and command allowlist/denylist validation.
 - Secret redaction in logs; zod config validation.
 
-## 6. Current build state
+## 7. Current build state
 
-This repository is being built phase by phase. As of the Phase 4 report:
+This repository is being built phase by phase. As of the Phase 5 report:
 
 - **Phase 0** — research docs and ADRs: complete.
 - **Phase 1** — Config, LLM provider interfaces + Ollama/OpenAI-compatible
@@ -95,6 +121,8 @@ This repository is being built phase by phase. As of the Phase 4 report:
   knowledge store: complete.
 - **Phase 4** — code execution, error classification, external verification and
   the bounded repair loop: complete.
+- **Phase 5** — role-based sub-agents, context isolation, least-privilege role
+  toolsets, delegation as a tool, delegated-edit verification: complete.
 
 ### Environment constraints observed during the build
 
@@ -107,7 +135,7 @@ This repository is being built phase by phase. As of the Phase 4 report:
 - Network egress works (npm registry and docs.ollama.com reachable), so research
   was performed live rather than from memory.
 
-## 7. References
+## 8. References
 
 - `docs/roadmap.md` — phase plan and status.
 - `docs/adr/*` — architectural decisions.

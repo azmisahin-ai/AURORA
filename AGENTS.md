@@ -76,9 +76,9 @@ npm run test:unit
 ## Layout
 
 ```
-src/core/        agent loop, planner, errors (later: memory/task/context)
+src/core/        agent loop, planner, errors, sub-agents/roles (later: memory/task/context)
 src/providers/   LLM/web/execution adapters implementing owned interfaces
-src/tools/       tool registry and tools (Phase 2: read/write/list/run_command, Phase 4: run_tests)
+src/tools/       tool registry and tools (Phase 2: read/write/list/run_command, Phase 4: run_tests, Phase 5: delegate)
 src/security/    permissions, path/command validation (later: url, redaction)
 src/cli/         commander entry point
 docs/research/   sourced research notes
@@ -99,7 +99,9 @@ model cannot argue past the gate.
 
 Permissions (`src/security/PermissionManager.ts`): `READ_ONLY`,
 `WORKSPACE_WRITE`, `COMMAND_EXECUTION`, `NETWORK_ACCESS`, `FULL_ACCESS`.
-`NETWORK_ACCESS` is deliberately withheld until Phase 3 adds URL validation.
+`NETWORK_ACCESS` is granted by default since Phase 3 shipped `UrlValidator` +
+SSRF-contained fetching — the control that makes it safe is URL validation, not
+withholding the permission. Sub-agent roles cap it further (Phase 5).
 
 `LocalExecutionProvider` runs commands with `shell: false` and a minimal
 environment (no inherited secrets). `CommandValidator` rejects shell
@@ -171,3 +173,47 @@ Structured signals beat text (`status: 401` over a message saying "invalid");
 policy, and parser with the verifier (`TestSummary.ts`) so the model's view and
 the gate's view cannot drift. Exit 0 is necessary but **not sufficient**: a
 vacuous run is a failure (`ranNoTests`).
+
+## Sub-agents (Phase 5, ADR 007)
+
+Delegation is a **tool** (`delegate`), so it appears in the trajectory like any
+other action. It stands up a `SubAgentManager` (`src/core/agent/subagent/`),
+which runs a role-scoped `AgentLoop`. Roles are fixed
+(`src/core/agent/roles/definitions.ts`): `researcher`, `coder`, `tester`,
+`reviewer`, `documenter` — each with a system prompt, a tool list, a permission
+cap, and a budget. `AURORA_MAX_SUB_AGENTS=0` disables delegation entirely.
+
+Four invariants, each with a test:
+
+1. **Context isolation** — a sub-agent's first provider call has exactly two
+   messages: the role prompt and the task. It never sees the parent transcript.
+   The role prompt *replaces* the parent's; it does not extend it.
+2. **Least privilege is structural** — a role's registry is built from its tool
+   list ∩ the parent's grant, minus `FULL_ACCESS`. A tool the role cannot afford
+   is *absent*, not denied at call time. The reviewer's registry has no
+   `write_file` at all.
+3. **No recursion** — `delegate` is registered into the parent registry only;
+   role registries are built from a catalog that excludes it. A sub-agent cannot
+   reach it, so there is no depth bound to get wrong.
+4. **Delegated edits are verified** — `delegate` reports `mutatedWorkspace`
+   **dynamically** when the sub-agent changed the workspace. `ToolRegistry` ORs
+   this with the tool's static declaration (on success only), so the parent's
+   Phase 4 gate still fires for a delegated edit. `ToolResult.mutatedWorkspace`
+   and `RunResult.mutatedWorkspace` carry it.
+
+A sub-agent's answer is wrapped with `wrapUntrusted` before it reaches the
+parent: it is our own model's text, but a researcher quotes fetched pages.
+
+**Wiring note:** `AgentRuntime` builds the registry first (which yields the
+`RoleToolsetBuilder`), then constructs the manager and registers `delegate` back
+into the registry. Two steps because the tool layer needs the manager and the
+manager needs the tool layer; the alternative inverts the ADR 001 dependency
+direction.
+
+## Test harness note
+
+`vitest.config.ts` sets `fileParallelism: false`. All five live integration
+tests drive the **same** single Ollama instance; in parallel they queue behind
+one another until a 300s test timeout fires — a flake unrelated to the code
+under test. Serialising files costs a few seconds on the unit suite and makes
+the suite deterministic. This is a harness fix, not a skip.

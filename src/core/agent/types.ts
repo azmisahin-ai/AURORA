@@ -12,6 +12,11 @@ export interface ToolExecutionResult {
    * True when this call changed workspace state. Set by the tool layer from the
    * tool's declared `mutatesWorkspace`; the loop uses it to decide whether an
    * external verification is warranted.
+   *
+   * Also set *dynamically* by a tool that changed the workspace through
+   * something other than itself — `delegate`, which ran a sub-agent that
+   * edited. The declared flag is static and cannot express that; the dynamic
+   * one lets a delegation that wrote code still trigger the parent's verifier.
    */
   mutatedWorkspace?: boolean;
 }
@@ -100,6 +105,13 @@ export interface RunResult {
   verifications?: number;
   /** The last verification outcome, if any. */
   lastVerification?: VerificationOutcome;
+  /**
+   * True when this run changed the workspace — directly (a mutating tool
+   * succeeded) or indirectly (a delegated sub-agent changed it). The parent
+   * uses this to decide whether its own verifier must agree before accepting a
+   * delegated edit (ADR 006).
+   */
+  mutatedWorkspace?: boolean;
 }
 
 export interface AgentLoopDeps {

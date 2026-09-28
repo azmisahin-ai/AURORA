@@ -9,6 +9,7 @@ export interface RunCommandOptions {
   provider?: string;
   testCommand?: string;
   maxVerifications?: string;
+  maxSubAgents?: string;
 }
 
 export function registerRunCommand(program: Command): void {
@@ -21,6 +22,7 @@ export function registerRunCommand(program: Command): void {
     .option("--provider <name>", "override AURORA_LLM_PROVIDER (ollama|openai-compatible)")
     .option("--test-command <cmd>", "external check run before accepting completion (Phase 4)")
     .option("--max-verifications <n>", "cap on verify→repair attempts; 0 disables")
+    .option("--max-sub-agents <n>", "cap on sub-agent delegations; 0 disables (Phase 5)")
     .action(async (task: string, options: RunCommandOptions) => {
       const env = { ...process.env };
       if (options.maxIterations) env.AURORA_MAX_ITERATIONS = options.maxIterations;
@@ -28,6 +30,7 @@ export function registerRunCommand(program: Command): void {
       if (options.provider) env.AURORA_LLM_PROVIDER = options.provider;
       if (options.testCommand) env.AURORA_TEST_COMMAND = options.testCommand;
       if (options.maxVerifications) env.AURORA_MAX_VERIFICATIONS = options.maxVerifications;
+      if (options.maxSubAgents) env.AURORA_MAX_SUB_AGENTS = options.maxSubAgents;
 
       const config = loadConfig(env);
       const logger = createLogger(config.logLevel);

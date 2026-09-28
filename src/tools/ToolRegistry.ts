@@ -140,7 +140,12 @@ export class ToolRegistry implements ToolExecutor {
         ok: result.ok,
         observation: result.output,
         ...(result.fatal !== undefined ? { fatal: result.fatal } : {}),
-        ...(result.ok && tool.mutatesWorkspace === true ? { mutatedWorkspace: true } : {}),
+        // On success only: a failed write changed nothing. The mutation is true
+        // when the tool declared itself mutating *or* reported a change it made
+        // indirectly (a delegation that edited).
+        ...(result.ok && (tool.mutatesWorkspace === true || result.mutatedWorkspace === true)
+          ? { mutatedWorkspace: true }
+          : {}),
       };
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);

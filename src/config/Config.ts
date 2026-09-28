@@ -27,6 +27,12 @@ export const ConfigSchema = z.object({
   testTimeoutMs: z.coerce.number().int().positive().default(300_000),
   maxVerifications: z.coerce.number().int().min(0).default(0),
 
+  // Sub-agents (Phase 5). 0 disables delegation entirely, which is the
+  // pre-Phase-5 behaviour: no `delegate` tool is registered and no role
+  // toolsets are built. Each role also has its own per-delegation budget
+  // (see `core/agent/roles/definitions.ts`).
+  maxSubAgents: z.coerce.number().int().min(0).default(3),
+
   // Web research. `noop` means no search backend is configured; research then
   // falls back to fetching known URLs, which is a degraded mode, not an error.
   searchProvider: z.enum(["noop"]).default("noop"),
@@ -84,6 +90,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     testCommand: env.AURORA_TEST_COMMAND,
     testTimeoutMs: env.AURORA_TEST_TIMEOUT_MS,
     maxVerifications: env.AURORA_MAX_VERIFICATIONS,
+
+    maxSubAgents: env.AURORA_MAX_SUB_AGENTS,
 
     searchProvider: env.AURORA_SEARCH_PROVIDER,
     fetchTimeoutMs: env.AURORA_FETCH_TIMEOUT_MS,

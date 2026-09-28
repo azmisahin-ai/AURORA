@@ -72,6 +72,7 @@ export class AgentLoop {
       ...(error !== undefined ? { error } : {}),
       ...(verificationCount > 0 ? { verifications: verificationCount } : {}),
       ...(lastVerification !== undefined ? { lastVerification } : {}),
+      ...(hasMutated ? { mutatedWorkspace: true } : {}),
     });
 
     try {

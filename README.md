@@ -12,7 +12,8 @@ claim either tested or explicitly marked *DOĞRULANACAK*.
 - **Phase 2** — tool system + permissions: ✅ complete
 - **Phase 3** — web research + knowledge store: ✅ complete
 - **Phase 4** — code execution + external verification loop: ✅ complete
-- Phases 5–10: not started. See `docs/roadmap.md`.
+- **Phase 5** — sub-agent system (roles, delegation, least privilege): ✅ complete
+- Phases 6–10: not started. See `docs/roadmap.md`.
 
 ## Requirements
 
@@ -44,6 +45,9 @@ Key variables:
 | `AURORA_TIMEOUT_MS` | `120000` | Wall-clock bound per run |
 | `AURORA_WORKSPACE` | `./workspace` | Sandbox root for file tools |
 | `AURORA_KNOWLEDGE_DIR` | `./knowledge` | Knowledge store root |
+| `AURORA_TEST_COMMAND` | — | External check for Phase 4 verification |
+| `AURORA_MAX_VERIFICATIONS` | `0` | Cap on verify→repair attempts; 0 disables |
+| `AURORA_MAX_SUB_AGENTS` | `3` | Cap on sub-agent delegations; 0 disables (Phase 5) |
 
 ## Usage
 
@@ -58,6 +62,9 @@ node dist/cli/index.js run "Node.js hakkında araştırma yap" --max-iterations 
 # Require an external check before the run may report success (Phase 4)
 node dist/cli/index.js run "fix the failing test" \
   --test-command "npm test" --max-verifications 3
+
+# Allow role-based sub-agents to be delegated to (Phase 5; default 3, 0 disables)
+node dist/cli/index.js run "implement and test the parser" --max-sub-agents 4
 
 # Any OpenAI-compatible endpoint
 AURORA_LLM_PROVIDER=openai-compatible \

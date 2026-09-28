@@ -7,9 +7,9 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
 | 0 | Research + Architecture + ADR | — | 1–2 gün | ✅ |
 | 1 | Core Agent Loop + CLI | Phase 0 | 2–3 gün | ✅ |
 | 2 | Tool System + Permissions | Phase 1 | 2–3 gün | ✅ |
-| 3 | Web Research + Knowledge | Phase 2 | 3–4 gün | 🚧 |
-| 4 | Code Execution + Verification | Phase 3 | 3–4 gün | ⬜ |
-| 5 | Sub-Agent System | Phase 4 | 3–4 gün | ⬜ |
+| 3 | Web Research + Knowledge | Phase 2 | 3–4 gün | ✅ |
+| 4 | Code Execution + Verification | Phase 3 | 3–4 gün | ✅ |
+| 5 | Sub-Agent System | Phase 4 | 3–4 gün | ✅ |
 | 6 | Persistence + Task Recovery | Phase 5 | 2–3 gün | ⬜ |
 | 7 | Context + Memory | Phase 6 | 2–3 gün | ⬜ |
 | 8 | Security Hardening | Phase 7 | 3–4 gün | ⬜ |
@@ -94,5 +94,31 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
       completion, the model repairs it, and the green run is accepted —
       asserted against real processes (`tests/integration/verification-live.test.ts`).
 - [x] Verification is opt-in; defaults preserve Phase 1–3 behaviour.
+
+> No phase is advanced until the previous phase's acceptance criteria are met.
+
+## Phase 5 acceptance
+
+- [x] The main agent can delegate a research task to a Researcher sub-agent and
+      get its result back (`tests/unit/agent/subagent-manager.test.ts`).
+- [x] Sub-agents run in-process as role-based instances, not microservices
+      (ADR 007).
+- [x] Context isolation: a sub-agent receives only its role prompt and the
+      delegated task — never the parent's transcript.
+- [x] Least privilege is structural: a role's toolset is the intersection of its
+      tool list and the parent's grant, with `FULL_ACCESS` never propagated. The
+      reviewer's registry contains no write tool at all.
+- [x] Sub-agents cannot delegate — `delegate` is absent from every role registry
+      by construction, not by a depth check.
+- [x] A delegated workspace mutation still triggers the parent's external
+      verifier (`mutatedWorkspace` propagates dynamically).
+- [x] A sub-agent's answer is wrapped as `UNTRUSTED DATA`.
+- [x] Cost is bounded twice: per-delegation role budget and per-run
+      `maxSubAgents`; exhausting the latter returns an error, not a crash.
+- [x] Delegation is opt-in; `AURORA_MAX_SUB_AGENTS=0` restores the pre-Phase-5
+      registry.
+- [x] Live end-to-end: a real model delegates to a real coder sub-agent that
+      writes a real file, asserted on disk and on the trajectory
+      (`tests/integration/subagent-live.test.ts`).
 
 > No phase is advanced until the previous phase's acceptance criteria are met.

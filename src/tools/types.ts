@@ -25,6 +25,12 @@ export interface ToolResult {
   output: string;
   /** True when the failure must stop the run rather than be fed back. */
   fatal?: boolean;
+  /**
+   * Set by a tool that changed the workspace *indirectly* (e.g. `delegate` ran
+   * a sub-agent that edited). The registry ORs this with the tool's static
+   * `mutatesWorkspace` declaration, on success only.
+   */
+  mutatedWorkspace?: boolean;
 }
 
 /**

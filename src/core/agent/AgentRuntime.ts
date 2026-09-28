@@ -7,7 +7,9 @@ import type { LLMProvider } from "../../providers/llm/LLMProvider.js";
 import { CommandVerifier } from "../../providers/execution/CommandVerifier.js";
 import { AgentLoop } from "./AgentLoop.js";
 import type { ToolExecutor, Verifier } from "./types.js";
+import { SubAgentManager, type SubAgentManagerPort } from "./subagent/index.js";
 import { buildToolRegistry } from "../../tools/index.js";
+import { delegateTool } from "../../tools/agent/DelegateTool.js";
 
 export interface RuntimeOptions {
   config?: Config;
@@ -15,6 +17,8 @@ export interface RuntimeOptions {
   tools?: ToolExecutor;
   verifier?: Verifier;
   logger?: Logger;
+  /** Override sub-agent spawning. Tests inject a scripted manager. */
+  subAgentManager?: SubAgentManagerPort;
 }
 
 /**
@@ -34,12 +38,35 @@ export class AgentRuntime {
     this.config = opts.config ?? loadConfig();
     this.logger = opts.logger ?? createLogger(this.config.logLevel);
     this.llm = opts.llm ?? createLLMProvider(this.config);
+
+    // Two steps, because the tool layer needs the manager (to register
+    // `delegate`) and the manager needs the tool layer (for role toolsets).
+    // Building the registry first yields the role toolset builder; the manager
+    // is then constructed from it and its `delegate` tool registered back in.
     const built = buildToolRegistry({
       config: this.config,
       logger: this.logger,
     });
-    this.tools = opts.tools ?? built.registry;
     this.verifier = opts.verifier ?? createVerifier(this.config, built, this.logger);
+
+    if (opts.tools) {
+      this.tools = opts.tools;
+    } else {
+      const manager =
+        opts.subAgentManager ??
+        (this.config.maxSubAgents > 0
+          ? new SubAgentManager({
+              llm: this.llm,
+              toolsetBuilder: built.roleToolsetBuilder,
+              ...(this.verifier !== undefined ? { verifier: this.verifier } : {}),
+              maxSubAgents: this.config.maxSubAgents,
+              timeoutMs: this.config.timeoutMs,
+              logger: this.logger,
+            })
+          : undefined);
+      if (manager) built.registry.register(delegateTool(manager));
+      this.tools = built.registry;
+    }
   }
 
   createLoop(): AgentLoop {
