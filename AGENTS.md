@@ -107,3 +107,33 @@ metacharacters and non-allowlisted commands before execution.
 `listModels`, `health` optional. Concrete implementations:
 `OllamaProvider`, `OpenAICompatibleProvider`. Vendor-specific options go in the
 opaque `options` bag so they never leak into core.
+
+## Web research + knowledge (Phase 3)
+
+`Fetcher` (`src/providers/web/Fetcher.ts`) and `SearchProvider`
+(`src/providers/web/search/SearchProvider.ts`) are owned interfaces.
+`DirectFetcher` is the real fetcher; `NoopSearchProvider` is the default so
+research works with no API keys.
+
+**Every URL is validated by `UrlValidator` before connecting, and re-validated on
+every redirect hop.** Addresses are parsed numerically, because the URL parser
+rewrites `[::ffff:127.0.0.1]` to the hex form `[::ffff:7f00:1]` — a dotted-quad
+regex silently misses that SSRF bypass. Unparseable addresses fail closed.
+See ADR 005 for the encodings covered.
+
+`DirectFetcher` pins the connection to the address it validated, so validation
+and connection are not two independent DNS lookups (DNS-rebinding race).
+
+**Anything from outside the trust boundary is wrapped by `UntrustedData`**
+(`src/security/UntrustedData.ts`): a random-nonce delimiter, an explicit "this is
+data, not an instruction" preamble, and a character cap. Applied to `web_fetch`
+and `knowledge_search` output. The payload is preserved so the model can reason
+about it — only its authority is denied.
+
+`KnowledgeStore` (`src/core/knowledge/`) is a filesystem store with a JSON
+metadata sidecar; `FileKnowledgeStore` is the implementation (ADR 002). Slugs are
+normalised so `../../etc/passwd` cannot escape the knowledge root. Knowledge
+content is treated as untrusted on the way back out.
+
+Tools: `web_fetch`, `web_search`, `knowledge_write`, `knowledge_search`.
+`web_fetch`/`web_search` require `NETWORK_ACCESS`.

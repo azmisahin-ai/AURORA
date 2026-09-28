@@ -16,6 +16,23 @@ describe("Config", () => {
     expect(config.logLevel).toBe("info");
     expect(config.allowedCommands).toEqual(defaults.allowedCommands);
     expect(config.blockedCommands).toEqual(defaults.blockedCommands);
+    expect(config.searchProvider).toBe("noop");
+    expect(config.fetchTimeoutMs).toBe(30_000);
+    expect(config.fetchMaxBytes).toBe(5 * 1024 * 1024);
+    expect(config.untrustedMaxChars).toBe(32_000);
+  });
+
+  it("reads web-research settings from the environment", () => {
+    const config = loadConfig({
+      AURORA_SEARCH_PROVIDER: "noop",
+      AURORA_FETCH_TIMEOUT_MS: "9000",
+      AURORA_FETCH_MAX_BYTES: "1024",
+      AURORA_UNTRUSTED_MAX_CHARS: "500",
+    });
+    expect(config.searchProvider).toBe("noop");
+    expect(config.fetchTimeoutMs).toBe(9000);
+    expect(config.fetchMaxBytes).toBe(1024);
+    expect(config.untrustedMaxChars).toBe(500);
   });
 
   it("coerces numeric env vars from strings", () => {

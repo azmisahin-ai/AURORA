@@ -20,6 +20,14 @@ export const ConfigSchema = z.object({
   timeoutMs: z.coerce.number().int().positive().default(120_000),
   tokenBudget: z.coerce.number().int().positive().default(100_000),
 
+  // Web research. `noop` means no search backend is configured; research then
+  // falls back to fetching known URLs, which is a degraded mode, not an error.
+  searchProvider: z.enum(["noop"]).default("noop"),
+  fetchTimeoutMs: z.coerce.number().int().positive().default(30_000),
+  fetchMaxBytes: z.coerce.number().int().positive().default(5 * 1024 * 1024),
+  /** Cap on characters of untrusted content injected into context. */
+  untrustedMaxChars: z.coerce.number().int().positive().default(32_000),
+
   logLevel: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"])
     .default("info"),
@@ -65,6 +73,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxToolCalls: env.AURORA_MAX_TOOL_CALLS,
     timeoutMs: env.AURORA_TIMEOUT_MS,
     tokenBudget: env.AURORA_TOKEN_BUDGET,
+
+    searchProvider: env.AURORA_SEARCH_PROVIDER,
+    fetchTimeoutMs: env.AURORA_FETCH_TIMEOUT_MS,
+    fetchMaxBytes: env.AURORA_FETCH_MAX_BYTES,
+    untrustedMaxChars: env.AURORA_UNTRUSTED_MAX_CHARS,
 
     logLevel: env.AURORA_LOG_LEVEL,
 

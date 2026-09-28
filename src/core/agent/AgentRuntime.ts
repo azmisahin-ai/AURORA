@@ -31,7 +31,8 @@ export class AgentRuntime {
     this.config = opts.config ?? loadConfig();
     this.logger = opts.logger ?? createLogger(this.config.logLevel);
     this.llm = opts.llm ?? createLLMProvider(this.config);
-    this.tools = opts.tools ?? buildToolRegistry({ config: this.config, logger: this.logger });
+    this.tools =
+      opts.tools ?? buildToolRegistry({ config: this.config, logger: this.logger }).registry;
   }
 
   createLoop(): AgentLoop {

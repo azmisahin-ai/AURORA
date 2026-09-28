@@ -50,3 +50,24 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
       the file is verified on disk (`tests/integration/tool-use-live.test.ts`).
 
 > No phase is advanced until the previous phase's acceptance criteria are met.
+
+## Phase 3 acceptance
+
+- [x] Research is possible with **no search API key**: `web_fetch` alone
+      suffices; `web_search` degrades to an explanatory message.
+      (`tests/integration/web-research.test.ts` § "degraded mode")
+- [x] Knowledge written with its metadata and retrievable by keyword, with
+      provenance (source URL, `retrievedAt`, `verified`) intact.
+- [x] Prompt injection **fails**: fetched content is wrapped in a random-nonce
+      `UNTRUSTED DATA` block, the payload is confined to exactly one block, and
+      the payload never appears before the block opens.
+- [x] SSRF is refused: `file://`, `localhost`, `169.254.169.254`, private
+      literals, **and** the IPv6 hex form the URL parser rewrites them to.
+      Verified against real DNS with `127.0.0.1.nip.io`.
+- [x] Redirects are re-validated hop by hop.
+- [x] Live end-to-end: a real model fetches a real page and writes a real
+      knowledge entry, asserted **on disk** (`tests/integration/research-live.test.ts`).
+- [x] `aurora research "<topic>"` and `aurora knowledge {list,search,show}` work
+      from the terminal.
+
+> No phase is advanced until the previous phase's acceptance criteria are met.

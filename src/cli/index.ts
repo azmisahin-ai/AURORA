@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { registerRunCommand } from "./commands/run.js";
+import { registerResearchCommand } from "./commands/research.js";
+import { registerKnowledgeCommand } from "./commands/knowledge.js";
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -10,6 +12,8 @@ export function buildProgram(): Command {
     .version("0.1.0");
 
   registerRunCommand(program);
+  registerResearchCommand(program);
+  registerKnowledgeCommand(program);
   return program;
 }
 
