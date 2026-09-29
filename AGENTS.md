@@ -297,6 +297,62 @@ than re-deriving it from `Date.now() >= deadline`; `setTimeout` can fire a hair
 before the clock reaches the deadline, which mislabelled a genuine timeout as
 `aborted` (intermittent, cold-start only).
 
+## Security hardening (Phase 8, ADR 010)
+
+Four gaps closed; the existing controls (path traversal, SSRF, command
+allowlist, untrusted wrapping, permissions, timeouts) were **not** rewritten.
+
+**`SecretRedactor`** redacts by credential *shape* — vendor prefixes (`sk-`,
+`sk-ant-`, `ghp_`/`github_pat_`, `AKIA`, `xox`, `AIza`, `sk_live_`), JWTs,
+`Bearer` tokens, PEM blocks, and `scheme://user:password@host`. The one loose
+pattern (`password = …`) is filtered by `looksLikeSecret` so ordinary prose is
+untouched; the false-positive corpus is a test, not a comment. `redactValue`
+handles cycles (`[Circular]`) and leaves `Error` objects intact.
+
+Scope is deliberate: logs and confirmation prompts are redacted, the **model's
+observations are not** — a file containing a key must stay readable. That
+boundary is stated, not implied.
+
+**`ConfirmationGate`** is three-valued: `approved | denied | unavailable`.
+Collapsing `denied` into `unavailable` would make an unattended run
+indistinguishable from a user's refusal. `AllowAllGate` (default), `DenyAllGate`,
+`PromptGate` (injected `ask`, so it is testable without a TTY). The gate fires
+when a tool sets `mutatesWorkspace` **or** requires `COMMAND_EXECUTION` — a
+shell command can change the machine without declaring a workspace mutation.
+Only the CLI builds a `PromptGate`; the library falls back to `DenyAllGate`,
+because `prompt` has no safe default without stdin.
+
+**`KeyedRateLimiter`** bounds *network* tools with a per-tool token bucket. A
+denial is an observation telling the model to slow down, not a throw: the loop
+must stay recoverable. The clock is injected — otherwise the only interesting
+test is a flaky sleep.
+
+**`maxArgumentBytes`** (default 64 KiB) rejects a call whose serialised
+arguments exceed it, checked right after schema validation and *before* the
+confirmation prompt, so a giant payload never reaches a terminal.
+
+**Wiring is tested.** `buildToolRegistry` maps config → concrete cap/gate/
+redactor/limiter, each overridable via `opts.*`. `tests/unit/tools/
+build-tool-registry.test.ts` asserts the wiring, because a control that exists
+but is not connected is not a control. Two mutants (redactor wiring removed,
+config limiter branch forced off) passed before that file existed and fail now.
+
+Secrets reach the confirmation prompt and the denial log only after redaction;
+the summary shown to the user is built from the *redacted* arguments, so a
+summary cannot leak what the arguments scrubbed.
+
+`booleanFromString` treats `"false"`/`"0"` as false — `z.coerce.boolean()` makes
+`"false"` truthy; there is a regression test.
+
+Env: `AURORA_REDACT_LOGS` (default true), `AURORA_MAX_ARGUMENT_BYTES` (64 KiB),
+`AURORA_TOOL_RATE_LIMIT` / `AURORA_TOOL_RATE_REFILL` (20 / 1; 0 disables),
+`AURORA_CONFIRM_MODE` (`allow` | `deny` | `prompt`), `AURORA_CONFIRM_STRICT`.
+CLI: `run --confirm | --no-confirm | --confirm-strict`.
+
+**Open, tagged DOĞRULANACAK:** selective observation redaction (redact
+`run_command` output but not `read_file`) is plausible but not designed; done
+badly it breaks tool use. Rate limits are in-process and reset on restart.
+
 ## Test harness note
 
 `vitest.config.ts` sets `fileParallelism: false`. All five live integration

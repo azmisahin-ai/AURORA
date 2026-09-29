@@ -152,7 +152,7 @@ knowledge/
 
 With JSON metadata (`topic`, `source`, `retrievedAt`, `provider`, `verified`).
 
-## 7. Security (ADR 004)
+## 7. Security (ADR 004, ADR 010)
 
 - Untrusted web content wrapped in nonce delimiters, never treated as
   instructions.
@@ -160,10 +160,24 @@ With JSON metadata (`topic`, `source`, `retrievedAt`, `provider`, `verified`).
   NETWORK_ACCESS / FULL_ACCESS.
 - Path traversal, SSRF, and command allowlist/denylist validation.
 - Secret redaction in logs; zod config validation.
+- **Phase 8 additions (ADR 010):**
+  - Shape-based `SecretRedactor` (vendor prefixes, JWTs, bearer tokens, PEM
+    blocks, URL passwords) applied to logs and confirmation prompts — not to the
+    model's observations, which stay raw so a file containing a key is still
+    readable. That boundary is stated, not implied.
+  - A three-valued `ConfirmationGate` (`approved | denied | unavailable`) for
+    state-changing tools: a declared workspace mutation or any
+    `COMMAND_EXECUTION` tool. The CLI owns the only `PromptGate`; the library
+    fails closed.
+  - A per-tool `KeyedRateLimiter` bounding network tools (denial is an
+    observation, not a throw) and a hard `maxArgumentBytes` cap applied before
+    validation and before the prompt.
+  - `buildToolRegistry` wiring is itself under test: config → cap/gate/redactor/
+    limiter, with mutation guards.
 
 ## 8. Current build state
 
-This repository is being built phase by phase. As of the Phase 6 report:
+This repository is being built phase by phase. As of the Phase 8 report:
 
 - **Phase 0** — research docs and ADRs: complete.
 - **Phase 1** — Config, LLM provider interfaces + Ollama/OpenAI-compatible
@@ -180,6 +194,9 @@ This repository is being built phase by phase. As of the Phase 6 report:
 - **Phase 7** — memory tiers and bounded context: session records on disk,
   extractive untrusted recall, budget-bounded provider calls, `sessions` CLI:
   complete.
+- **Phase 8** — security hardening: shape-based secret redaction, three-valued
+  confirmation gate, per-tool network rate limiting, argument size cap, and
+  tested `buildToolRegistry` wiring: complete.
 
 ### Environment constraints observed during the build
 

@@ -122,6 +122,16 @@ After the agent changes the workspace, it may not report success unless an
 bounded and escalates when the bound is hit (Phase 4, `docs/adr/006`). A check
 that could not run is reported as `skipped`, never as a pass.
 
+Phase 8 adds operator-facing controls (`docs/adr/010`): credentials are redacted
+from logs and confirmation prompts by *shape* (not only by known key path), a
+state-changing tool call passes through a three-valued confirmation gate
+(`approved | denied | unavailable`), network tools are rate-limited per tool, and
+a tool call whose arguments exceed `AURORA_MAX_ARGUMENT_BYTES` is refused. Set
+`AURORA_CONFIRM_MODE=deny` (or run `aurora run --confirm`) to gate mutations, and
+`aurora run --no-confirm` for unattended use. Redaction covers operator-visible
+surfaces, not the model's observations — a file containing a key stays readable,
+so a session can inspect it deliberately.
+
 ## Adding knowledge for future sessions
 
 Repository-specific context lives in `AGENTS.md`. See

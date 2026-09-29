@@ -6,6 +6,10 @@ import type { PermissionManager, Permission } from "../security/PermissionManage
 import type { PathValidator } from "../security/PathValidator.js";
 import type { CommandValidator } from "../security/CommandValidator.js";
 import type { ExecutionProvider } from "../providers/execution/ExecutionProvider.js";
+import type { ConfirmationGate } from "../security/ConfirmationGate.js";
+import { AllowAllGate } from "../security/ConfirmationGate.js";
+import type { KeyedRateLimiter } from "../security/RateLimiter.js";
+import { SecretRedactor } from "../security/SecretRedactor.js";
 import type { Tool, ToolContext } from "./types.js";
 
 export interface ToolRegistryOptions {
@@ -15,7 +19,30 @@ export interface ToolRegistryOptions {
   commandValidator: CommandValidator;
   execution: ExecutionProvider;
   logger: Logger;
+  /**
+   * Asked before a state-changing tool runs (Phase 8). Defaults to
+   * `AllowAllGate`: an unattended run should not deadlock on a prompt, and the
+   * controls that actually constrain it are permissions and validators.
+   */
+  confirmationGate?: ConfirmationGate;
+  /** Per-tool token buckets, applied to tools that reach the network. */
+  rateLimiter?: KeyedRateLimiter;
+  /** Hard cap on serialised tool arguments. Defaults to 64 KiB. */
+  maxArgumentBytes?: number;
+  /**
+   * Fields scrubbed from *log* events. Arguments are redacted before they are
+   * logged; the model still receives the raw observation (ADR 010).
+   */
+  redactor?: SecretRedactor;
 }
+
+const DEFAULT_MAX_ARGUMENT_BYTES = 64 * 1024;
+
+/** Tools whose success can change state, and so are confirmation-gated. */
+function requiresConfirmation(tool: Tool): boolean {
+  return tool.mutatesWorkspace === true || tool.requiredPermissions.includes("COMMAND_EXECUTION");
+}
+
 
 /**
  * Holds the tools available to a run and executes them behind a permission
@@ -120,6 +147,66 @@ export class ToolRegistry implements ToolExecutor {
       };
     }
 
+    // Bound the arguments before anything else touches them. A model that
+    // pastes a whole file into a tool call is a context-flooding attempt, and
+    // the cap is cheaper to enforce at the door than in each tool.
+    const maxArgumentBytes = this.options.maxArgumentBytes ?? DEFAULT_MAX_ARGUMENT_BYTES;
+    const argumentBytes = Buffer.byteLength(JSON.stringify(call.arguments ?? {}), "utf8");
+    if (argumentBytes > maxArgumentBytes) {
+      logger.warn(
+        { tool: call.name, argumentBytes, limit: maxArgumentBytes },
+        "tool arguments exceeded the size cap",
+      );
+      return {
+        ok: false,
+        observation:
+          `Argument payload for tool "${call.name}" is ${argumentBytes} bytes; ` +
+          `the limit is ${maxArgumentBytes}.`,
+      };
+    }
+
+    // Rate-limit tools that reach the network. The point is to stop a loop, not
+    // a user: the observation tells the model to slow down, and the wait is
+    // bounded so one denial cannot stall the run forever.
+    if (this.options.rateLimiter && tool.requiredPermissions.includes("NETWORK_ACCESS")) {
+      const decision = this.options.rateLimiter.tryAcquire(call.name);
+      if (!decision.allowed) {
+        logger.warn({ tool: call.name, retryAfterMs: decision.retryAfterMs }, "tool call rate-limited");
+        return {
+          ok: false,
+          observation:
+            `Rate limit reached for tool "${call.name}". ` +
+            `Retry in about ${decision.retryAfterMs} ms, or continue without it.`,
+        };
+      }
+    }
+
+    // Confirmation gate for state-changing calls. The three outcomes are kept
+    // distinct; only an explicit denial stops the call.
+    const gate = this.options.confirmationGate;
+    if (gate !== undefined && requiresConfirmation(tool)) {
+      // Summarise the *redacted* arguments, so a summary can never leak a
+      // credential the arguments themselves were scrubbed of.
+      const safeArgs = this.options.redactor
+        ? this.options.redactor.redactValue(parsed.data)
+        : parsed.data;
+      const outcome = await gate.request({
+        tool: call.name,
+        summary: summarizeCall(tool, safeArgs),
+        arguments: safeArgs,
+      });
+      if (outcome === "denied") {
+        logger.warn({ tool: call.name, args: safeArgs, gate: gate.name }, "tool call denied by confirmation gate");
+        return {
+          ok: false,
+          observation: `User denied permission to run "${call.name}". This denial is recorded.`,
+        };
+      }
+      if (outcome === "unavailable") {
+        logger.info({ tool: call.name, gate: gate.name }, "confirmation unavailable; proceeding under policy");
+      }
+    }
+
     const ctx: ToolContext = {
       workspace: this.options.workspace,
       pathValidator: this.options.pathValidator,
@@ -128,6 +215,7 @@ export class ToolRegistry implements ToolExecutor {
       logger,
       signal: signal ?? new AbortController().signal,
     };
+
 
     const started = Date.now();
     try {
@@ -153,4 +241,21 @@ export class ToolRegistry implements ToolExecutor {
       return { ok: false, observation: `Tool "${call.name}" failed: ${message}` };
     }
   }
+}
+
+/**
+ * A one-line summary of a call for the confirmation prompt. Deliberately terse
+ * and derived from the schema, so it names the action without leaking a whole
+ * argument payload into a terminal the user may be screen-sharing.
+ */
+function summarizeCall(tool: Tool, args: unknown): string {
+  const record = (args ?? {}) as Record<string, unknown>;
+  const bits: string[] = [];
+  for (const key of ["path", "command", "url", "role"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      bits.push(`${key}=${value.length > 80 ? `${value.slice(0, 77)}...` : value}`);
+    }
+  }
+  return bits.length > 0 ? bits.join(" ") : tool.description.split(".")[0]!.slice(0, 100);
 }

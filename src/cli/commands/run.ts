@@ -1,7 +1,14 @@
 import type { Command } from "commander";
+import { createInterface } from "node:readline/promises";
 import { loadConfig } from "../../config/Config.js";
 import { createLogger } from "../../observability/Logger.js";
 import { AgentRuntime } from "../../core/agent/AgentRuntime.js";
+import {
+  PromptGate,
+  AllowAllGate,
+  DenyAllGate,
+  type ConfirmationGate,
+} from "../../security/ConfirmationGate.js";
 
 export interface RunCommandOptions {
   maxIterations?: string;
@@ -13,6 +20,9 @@ export interface RunCommandOptions {
   recallSessions?: string;
   noRecall?: boolean;
   contextBudget?: string;
+  confirm?: boolean;
+  noConfirm?: boolean;
+  confirmStrict?: boolean;
 }
 
 export function registerRunCommand(program: Command): void {
@@ -29,6 +39,12 @@ export function registerRunCommand(program: Command): void {
     .option("--recall-sessions <n>", "prior sessions summarised into context; 0 disables (Phase 7)")
     .option("--no-recall", "disable prior-session recall for this run (Phase 7)")
     .option("--context-budget <tokens>", "override AURORA_TOKEN_BUDGET (Phase 7)")
+    .option("--confirm", "ask before each state-changing tool call (Phase 8)")
+    .option("--no-confirm", "force unattended mode, overriding AURORA_CONFIRM_MODE")
+    .option(
+      "--confirm-strict",
+      "with --confirm, deny state-changing calls when there is no interactive input",
+    )
     .action(async (task: string, options: RunCommandOptions) => {
       const env = { ...process.env };
       if (options.maxIterations) env.AURORA_MAX_ITERATIONS = options.maxIterations;
@@ -40,10 +56,14 @@ export function registerRunCommand(program: Command): void {
       if (options.recallSessions) env.AURORA_RECALL_SESSIONS = options.recallSessions;
       if (options.noRecall) env.AURORA_RECALL_SESSIONS = "0";
       if (options.contextBudget) env.AURORA_TOKEN_BUDGET = options.contextBudget;
+      if (options.confirm) env.AURORA_CONFIRM_MODE = "prompt";
+      if (options.noConfirm) env.AURORA_CONFIRM_MODE = "allow";
+      if (options.confirmStrict) env.AURORA_CONFIRM_STRICT = "true";
 
       const config = loadConfig(env);
-      const logger = createLogger(config.logLevel);
-      const runtime = new AgentRuntime({ config, logger });
+      const logger = createLogger(config.logLevel, { redact: config.redactLogs });
+      const confirmationGate = buildConfirmationGate(config.confirmMode, config.confirmStrict);
+      const runtime = new AgentRuntime({ config, logger, confirmationGate });
 
       // Fail loudly and specifically if the provider is unreachable. Reporting a
       // mock or an empty answer as success is exactly what the plan forbids.
@@ -101,3 +121,32 @@ export function registerRunCommand(program: Command): void {
       }
     });
 }
+
+/**
+ * The CLI is the only layer that owns stdin, so it is the only place a
+ * `PromptGate` may be built (Phase 8). `--confirm` sets `confirmMode=prompt`;
+ * with no TTY, `--confirm-strict` denies rather than silently approving.
+ */
+function buildConfirmationGate(mode: string, strict: boolean): ConfirmationGate {
+  if (mode !== "prompt") return new AllowAllGate();
+
+  const interactive = process.stdin.isTTY === true;
+  if (!interactive) {
+    // No one to ask: strict means refuse, otherwise proceed under policy.
+    return strict ? new DenyAllGate() : new AllowAllGate();
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  return new PromptGate({
+    ask: async (question) => {
+      try {
+        return await rl.question(question);
+      } catch {
+        return undefined;
+      } finally {
+        rl.close();
+      }
+    },
+  });
+}
+

@@ -56,6 +56,19 @@ export const ConfigSchema = z.object({
   logLevel: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"])
     .default("info"),
+  /** Scrub credential shapes out of log events (ADR 010). */
+  redactLogs: booleanFromString().default(true),
+
+  // Security hardening (Phase 8). `maxArgumentBytes` caps a single tool call;
+  // the rate limit is a per-tool token bucket (`0` disables it). `confirmMode`
+  // decides what happens before a state-changing tool runs: `allow` proceeds
+  // (unattended default), `prompt` asks, `deny` refuses. `prompt` falls back to
+  // proceeding when there is no interactive input, unless `confirmStrict`.
+  maxArgumentBytes: z.coerce.number().int().positive().default(64 * 1024),
+  toolRateLimit: z.coerce.number().int().min(0).default(20),
+  toolRateRefill: z.coerce.number().positive().default(1),
+  confirmMode: z.enum(["allow", "deny", "prompt"]).default("allow"),
+  confirmStrict: booleanFromString().default(false),
 
   allowedCommands: z.array(z.string()).default([
     "npm",
@@ -77,6 +90,21 @@ function splitList(value: string | undefined): string[] | undefined {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * Env-var boolean. `z.coerce.boolean()` is `Boolean(value)`, so the string
+ * "false" would become `true`; an env var that says `false` must mean false.
+ */
+function booleanFromString() {
+  return z.union([z.boolean(), z.string()]).transform((value, ctx) => {
+    if (typeof value === "boolean") return value;
+    const lowered = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(lowered)) return true;
+    if (["0", "false", "no", "off", ""].includes(lowered)) return false;
+    ctx.addIssue({ code: "custom", message: `Not a boolean: ${JSON.stringify(value)}` });
+    return z.NEVER;
+  });
 }
 
 const DEFAULT_ALLOWED = ["npm", "node", "npx", "git", "ls", "cat", "echo"];
@@ -117,6 +145,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     untrustedMaxChars: env.AURORA_UNTRUSTED_MAX_CHARS,
 
     logLevel: env.AURORA_LOG_LEVEL,
+    redactLogs: env.AURORA_REDACT_LOGS,
+
+    maxArgumentBytes: env.AURORA_MAX_ARGUMENT_BYTES,
+    toolRateLimit: env.AURORA_TOOL_RATE_LIMIT,
+    toolRateRefill: env.AURORA_TOOL_RATE_REFILL,
+    confirmMode: env.AURORA_CONFIRM_MODE,
+    confirmStrict: env.AURORA_CONFIRM_STRICT,
 
     allowedCommands: splitList(env.AURORA_ALLOWED_COMMANDS),
     blockedCommands: splitList(env.AURORA_BLOCKED_COMMANDS),

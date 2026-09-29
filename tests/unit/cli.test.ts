@@ -34,6 +34,15 @@ describe("CLI wiring", () => {
     expect(flags).toContain("--no-recall");
   });
 
+  it("exposes the Phase 8 confirmation options on run", () => {
+    const program = buildProgram();
+    const run = program.commands.find((c) => c.name() === "run")!;
+    const flags = run.options.map((o) => o.long);
+    expect(flags).toContain("--confirm");
+    expect(flags).toContain("--no-confirm");
+    expect(flags).toContain("--confirm-strict");
+  });
+
   it("exposes tasks add, list, show, recover and run", () => {
     const program = buildProgram();
     const tasks = program.commands.find((c) => c.name() === "tasks")!;

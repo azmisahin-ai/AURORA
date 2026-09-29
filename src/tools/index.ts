@@ -8,6 +8,13 @@ import {
   PermissionManager,
   type Permission,
 } from "../security/PermissionManager.js";
+import {
+  AllowAllGate,
+  DenyAllGate,
+  type ConfirmationGate,
+} from "../security/ConfirmationGate.js";
+import { KeyedRateLimiter } from "../security/RateLimiter.js";
+import { SecretRedactor } from "../security/SecretRedactor.js";
 import { LocalExecutionProvider } from "../providers/execution/LocalExecutionProvider.js";
 import { DirectFetcher } from "../providers/web/DirectFetcher.js";
 import { NoopSearchProvider } from "../providers/web/search/NoopSearchProvider.js";
@@ -60,6 +67,16 @@ export interface BuildToolRegistryOptions {
    * pre-Phase-5 registry — a run without sub-agents behaves as before.
    */
   subAgentManager?: SubAgentManagerPort;
+  /**
+   * Override the confirmation gate. Defaults to one derived from
+   * `config.confirmMode` (`allow` → AllowAllGate, `deny` → DenyAllGate).
+   * `prompt` has no safe default outside a terminal, so the CLI supplies one.
+   */
+  confirmationGate?: ConfirmationGate;
+  /** Override the log/observation secret redactor. */
+  redactor?: SecretRedactor;
+  /** Override the per-tool network rate limiter (config-derived by default). */
+  rateLimiter?: KeyedRateLimiter;
 }
 
 export interface BuiltTools {
@@ -120,6 +137,21 @@ export function buildToolRegistry(opts: BuildToolRegistryOptions): BuiltTools {
   const search = opts.searchProvider ?? createSearchProvider(opts);
   const execution = new LocalExecutionProvider();
 
+  // Phase 8 hardening pieces. The confirmation gate and rate limiter are shared
+  // by the parent registry and every role registry, so a sub-agent cannot get a
+  // laxer policy than its parent.
+  const confirmationGate =
+    opts.confirmationGate ?? defaultConfirmationGate(opts.config.confirmMode);
+  const redactor = opts.redactor ?? (opts.config.redactLogs ? new SecretRedactor() : undefined);
+  const rateLimiter =
+    opts.rateLimiter ??
+    (opts.config.toolRateLimit > 0
+      ? new KeyedRateLimiter({
+          capacity: opts.config.toolRateLimit,
+          refillPerSecond: opts.config.toolRateRefill,
+        })
+      : undefined);
+
   // The catalog is every real tool *except* `delegate`. Role registries are
   // built from it, which is what makes `delegate` structurally unavailable to
   // sub-agents: it is not that they are forbidden to call it, it is that the
@@ -158,6 +190,10 @@ export function buildToolRegistry(opts: BuildToolRegistryOptions): BuiltTools {
       commandValidator,
       execution,
       logger: opts.logger,
+      confirmationGate,
+      ...(rateLimiter !== undefined ? { rateLimiter } : {}),
+      ...(redactor !== undefined ? { redactor } : {}),
+      maxArgumentBytes: opts.config.maxArgumentBytes,
     }).registerAll([...tools]);
 
   const parentTools: Tool[] = [...catalog];
@@ -190,6 +226,30 @@ export function buildToolRegistry(opts: BuildToolRegistryOptions): BuiltTools {
     workspace,
     roleToolsetBuilder,
   };
+}
+
+/**
+ * Default confirmation gate from config. `prompt` is deliberately *not*
+ * representable here: a non-interactive build has no one to ask, so the CLI is
+ * the only layer that may construct a `PromptGate` (it owns stdin). A missing
+ * gate must never silently mean "allow", and it does not: `allow` is an
+ * explicit choice the operator made.
+ */
+function defaultConfirmationGate(mode: Config["confirmMode"]): ConfirmationGate {
+  switch (mode) {
+    case "allow":
+      return new AllowAllGate();
+    case "deny":
+      return new DenyAllGate();
+    case "prompt":
+      // Reached only if a caller sets confirmMode=prompt without supplying a
+      // gate. Fail closed rather than silently approving.
+      return new DenyAllGate();
+    default: {
+      const exhaustive: never = mode;
+      throw new Error(`Unsupported confirm mode: ${String(exhaustive)}`);
+    }
+  }
 }
 
 /**

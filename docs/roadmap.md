@@ -12,7 +12,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
 | 5 | Sub-Agent System | Phase 4 | 3–4 gün | ✅ |
 | 6 | Persistence + Task Recovery | Phase 5 | 2–3 gün | ✅ |
 | 7 | Context + Memory | Phase 6 | 2–3 gün | ✅ |
-| 8 | Security Hardening | Phase 7 | 3–4 gün | ⬜ |
+| 8 | Security Hardening | Phase 7 | 3–4 gün | ✅ |
 | 9 | CLI + API | Phase 8 | 2–3 gün | ⬜ |
 | 10 | UI (ayrı katman) | Phase 9 | 4–5 gün | ⬜ |
 
@@ -189,6 +189,46 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
       block, not on model prose (`tests/integration/memory-live.test.ts`).
 - [x] CLI: `sessions list | show | recall`; `run` gained `--recall-sessions`,
       `--no-recall`, `--context-budget`.
+
+> No phase is advanced until the previous phase's acceptance criteria are met.
+
+## Phase 8 acceptance
+
+- [x] Credentials are redacted from operator-visible surfaces by *shape*, not
+      only by known key path: vendor prefixes, JWTs, bearer tokens, PEM blocks
+      and URL passwords (`tests/unit/security/secret-redactor.test.ts`). The
+      path-based pino `redact` list is kept; the two layers are complementary.
+- [x] Redaction does not fire on ordinary prose: an explicit false-positive
+      corpus (code paths, `npm test`, versions, HTTP status lines, hashes,
+      timestamps, e-mails) is asserted unchanged; 0/8 in the corpus.
+- [x] A state-changing tool is confirmed before it runs. The gate has **three**
+      outcomes — `approved`, `denied`, `unavailable` — because collapsing
+      "denied" into "no input" would make an unattended run indistinguishable
+      from a user's refusal (ADR 010).
+- [x] The gate covers both a declared workspace mutation **and** any
+      `COMMAND_EXECUTION` tool; a denied call does not execute and is logged
+      (`tests/unit/tools/tool-registry-hardening.test.ts`).
+- [x] A tool call whose serialised arguments exceed `AURORA_MAX_ARGUMENT_BYTES`
+      is refused *before* validation and *before* the prompt, so a giant payload
+      never reaches a terminal.
+- [x] Network tools are bounded per tool by a token bucket; a denial returns an
+      observation telling the model to slow down rather than throwing, keeping
+      the loop recoverable. The clock is injected, so refill is tested exactly.
+- [x] Secrets are scrubbed from the confirmation question and from the
+      tool-denial log; the summary shown to the user is built from the *redacted*
+      arguments, so a summary cannot leak what the arguments scrubbed.
+- [x] The library fails closed: `prompt` mode has no safe default outside a
+      terminal, so only the CLI builds a `PromptGate`; the library falls back to
+      `DenyAllGate`.
+- [x] `buildToolRegistry` wiring is itself tested (config → cap/gate/redactor/
+      limiter), because a control that exists but is not connected is not a
+      control. Two mutants that passed before this test existed are now caught.
+- [x] `booleanFromString` treats `"false"`/`"0"` as false — the
+      `z.coerce.boolean()` trap is a regression test, not a comment.
+- [x] Live integration: real child processes, a real HTTP server, the real
+      registry, real validators and a real pino logger
+      (`tests/integration/security-hardening.test.ts`; canlı suite dahil
+      481 test / 0 FAIL).
 
 > No phase is advanced until the previous phase's acceptance criteria are met.
 

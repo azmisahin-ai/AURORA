@@ -122,4 +122,41 @@ describe("Config", () => {
     });
     expect(parsed.llmProvider).toBe("ollama");
   });
+
+  it("defaults Phase 8 hardening to the unattended-safe values", () => {
+    const config = loadConfig({});
+    expect(config.redactLogs).toBe(true);
+    expect(config.maxArgumentBytes).toBe(64 * 1024);
+    expect(config.toolRateLimit).toBe(20);
+    expect(config.toolRateRefill).toBe(1);
+    expect(config.confirmMode).toBe("allow");
+    expect(config.confirmStrict).toBe(false);
+  });
+
+  it("reads Phase 8 hardening settings from the environment", () => {
+    const config = loadConfig({
+      AURORA_REDACT_LOGS: "false",
+      AURORA_MAX_ARGUMENT_BYTES: "2048",
+      AURORA_TOOL_RATE_LIMIT: "0",
+      AURORA_TOOL_RATE_REFILL: "2",
+      AURORA_CONFIRM_MODE: "deny",
+      AURORA_CONFIRM_STRICT: "true",
+    });
+    expect(config.redactLogs).toBe(false);
+    expect(config.maxArgumentBytes).toBe(2048);
+    expect(config.toolRateLimit).toBe(0);
+    expect(config.toolRateRefill).toBe(2);
+    expect(config.confirmMode).toBe("deny");
+    expect(config.confirmStrict).toBe(true);
+  });
+
+  it("treats the string 'false' as false, not truthy", () => {
+    // A regression guard: z.coerce.boolean() would make this `true`.
+    expect(loadConfig({ AURORA_REDACT_LOGS: "false" }).redactLogs).toBe(false);
+    expect(loadConfig({ AURORA_CONFIRM_STRICT: "0" }).confirmStrict).toBe(false);
+  });
+
+  it("rejects an unknown confirm mode", () => {
+    expect(() => loadConfig({ AURORA_CONFIRM_MODE: "ask" })).toThrow(/confirmMode/);
+  });
 });

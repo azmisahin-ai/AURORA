@@ -35,3 +35,25 @@ export type {
   SessionStore,
   WorkingMemory,
 } from "./core/memory/index.js";
+export {
+  PathValidator,
+  CommandValidator,
+  UrlValidator,
+  PermissionManager,
+  SecretRedactor,
+  AllowAllGate,
+  DenyAllGate,
+  PromptGate,
+  RateLimiter,
+  KeyedRateLimiter,
+  wrapUntrusted,
+  wrapUntrustedText,
+} from "./security/index.js";
+export type {
+  ConfirmationGate,
+  ConfirmationOutcome,
+  ConfirmationRequest,
+  Permission,
+  RateLimitDecision,
+  RedactionFinding,
+} from "./security/index.js";

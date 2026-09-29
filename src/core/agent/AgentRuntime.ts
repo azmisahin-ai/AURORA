@@ -15,6 +15,7 @@ import { ContextBuilder } from "../context/ContextBuilder.js";
 import { FileSessionStore } from "../memory/SessionMemory.js";
 import { buildSessionRecall } from "../memory/SessionRecall.js";
 import type { SessionStore } from "../memory/types.js";
+import type { ConfirmationGate } from "../../security/ConfirmationGate.js";
 
 export interface RuntimeOptions {
   config?: Config;
@@ -28,6 +29,8 @@ export interface RuntimeOptions {
   sessionStore?: SessionStore;
   /** Disable bounded context construction; used by pre-Phase-7 tests. */
   contextBuilder?: ContextBuilder | null;
+  /** Confirmation gate for state-changing tools (Phase 8). */
+  confirmationGate?: ConfirmationGate;
 }
 
 /**
@@ -64,6 +67,9 @@ export class AgentRuntime {
     const built = buildToolRegistry({
       config: this.config,
       logger: this.logger,
+      ...(opts.confirmationGate !== undefined
+        ? { confirmationGate: opts.confirmationGate }
+        : {}),
     });
     this.verifier = opts.verifier ?? createVerifier(this.config, built, this.logger);
 
