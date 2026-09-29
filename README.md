@@ -20,6 +20,14 @@ claim either tested or explicitly marked *DOĞRULANACAK*.
 - **Phase 10** — UI, a separate layer (`AURORA_UI_DIR`): ✅ complete. See
   `docs/adr/012`, `docs/reports/phase-10.md`.
 
+The runtime core is complete. The path from here to the goal — a
+production-grade, local-first AI workstation (multi-architecture agents,
+retrieval, MCP, bounded concurrency, execution isolation) — is the
+**Post-Phase-10 roadmap** in `docs/roadmap.md`, with milestones M0–M8 and an
+acceptance criterion per capability. Current focus: **M0 / CAP-004**, live event
+visibility. `docs/aurora-capability-assessment.md` §13 maps every known gap to
+its milestone.
+
 ## Requirements
 
 - Node.js ≥ 20

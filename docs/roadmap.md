@@ -308,3 +308,223 @@ connected to the core only over HTTP.
       not run.
 
 > No phase is advanced until the previous phase's acceptance criteria are met.
+
+---
+
+# Post-Phase-10 roadmap — from MVP core to the goal
+
+Phases 0–10 delivered the runtime core; every acceptance criterion above is met.
+This section is the path from *mature MVP core* to the actual goal:
+
+> **A production-grade, local-first TypeScript AI workstation** — multi-architecture
+> agents, provider independence, memory + retrieval, MCP, bounded multi-agent
+> concurrency, and defense-in-depth security, running against a local model with
+> no cloud dependency.
+
+It is the honest gap list from `docs/aurora-capability-assessment.md` §7 and §13
+turned into milestones. Nothing here is a wish: each capability names the
+acceptance criterion that will prove it, in the same style as the phases above.
+
+## Where we are (2026-09-29)
+
+| Goal axis | State | Evidence |
+|---|---|---|
+| ReAct | ✅ core loop | `AgentLoop.ts` |
+| Reflexion | 🟡 external-signal repair only; no model self-critique | ADR 001/006 — deliberate |
+| Plan-Execute | ❌ planner is thin (first tool call, else final) | assessment §2.2 |
+| Tree-of-Thoughts | ❌ absent | assessment §2.3 |
+| Multi-agent | ✅ 5 roles, least privilege; ❌ sequential only | ADR 007 |
+| Provider abstraction | ✅ Ollama + OpenAI-compatible; ❌ no streaming on the latter | ADR 003 |
+| Memory | ✅ three tiers; ❌ no vector/hybrid retrieval | ADR 009 |
+| RAG | ❌ keyword only | assessment §5.4 |
+| MCP | ❌ research only, no code | assessment §7 |
+| Security | ✅ strong; ❌ no execution sandbox; ❌ observations not redacted | ADR 004/010 |
+| API run persistence | ❌ in-process only | ADR 011 |
+
+## Milestones
+
+Legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferred
+
+| M | Name | Depends on | Status |
+|---|---|---|---|
+| **M0** | Capability visibility | — | 🚧 |
+| **M1** | Model-agnostic hardening & config truth | M0 | ⬜ |
+| **M2** | Retrieval — local-first RAG | M1 | ⬜ |
+| **M3** | Multi-architecture agents | M1 | ⬜ |
+| **M4** | MCP integration | M1 | ⬜ |
+| **M5** | Concurrency & durable runs | M2, M4 | ⬜ |
+| **M6** | Execution isolation | M5 | ⬜ |
+| **M7** | Operator experience & evaluation | M2–M6 | ⬜ |
+| **M8** | Multi-tenant deployment | — | ⏭️ |
+
+### M0 — Capability visibility 🚧
+
+**Why.** An operator cannot trust a run it cannot see. Before adding
+capabilities, the runtime must expose what it is doing, live, and report failure
+honestly.
+
+**CAP-004 — event model + live event visibility.** The current focus.
+
+- [x] One `EventBus` is the single record of "what happened"; the agent loop,
+      run registry and API all emit into it.
+- [x] `GET /runs/:id/events` and `GET /events` stream it as SSE, with
+      `?after=<sequence>` reconnect and bounded replay from a ring.
+- [x] The operator UI renders the timeline live, over `fetch` (not
+      `EventSource`, which cannot send an `Authorization` header).
+- [x] A refused mutation is reported as `denied`, never as `completed`
+      (ADR 010 in the permission dimension).
+- [x] Verified end to end in a real browser: a finished run replays all 7 events
+      in order.
+- [x] The SSE client is covered by an integration test against a real
+      `node:http` server (`tests/integration/ui-sse-client.test.ts`).
+
+**Remaining:** `app.js` wiring (which panel mounts the timeline, when the stream
+starts and stops) is still browser-smoke-only. Close it or accept it explicitly.
+
+### M1 — Model-agnostic hardening & config truth ⬜
+
+**Why.** "Model-agnostic" is a claim, not yet a fact: the shipped default
+(`llama3.2`) is often not pulled, and the OpenAI-compatible provider cannot
+stream. Both undercut the local-first promise.
+
+- [ ] The default model is one that is actually reachable, or `aurora` fails at
+      startup with a specific, actionable message — no silent wrong default
+      (assessment §13.3).
+- [ ] `aurora doctor` reports provider reachability, available models, and which
+      capabilities the selected model supports (tool calling, streaming).
+- [ ] OpenAI-compatible provider implements `stream`; NDJSON/SSE deltas and
+      streamed `tool_calls` are parsed and executed, then fed back.
+- [ ] Ollama streamed `tool_calls` are verified to be captured mid-stream and
+      round-tripped (not only in non-streaming mode).
+- [ ] Acceptance: a live test against a **local** OpenAI-compatible server (e.g.
+      LM Studio) streams a tool call and completes a task; the same suite passes
+      against Ollama.
+
+### M2 — Retrieval: local-first RAG ⬜
+
+**Why.** Keyword-only search degrades as knowledge grows. RAG is the difference
+between a notes folder and a research workstation — and it can be done with
+**zero new runtime dependencies**.
+
+**Verified on this host (2026-09-29, Node v24.21.0):** `node:sqlite` is built in
+and supports **FTS5** and the **trigram** tokenizer. No `better-sqlite3`, no
+native build step.
+
+- [ ] `KnowledgeStore` gains an indexed backend (SQLite FTS5) behind the existing
+      interface; the file store stays the source of truth (ADR 002 preserved).
+- [ ] Hybrid search: BM25 (FTS5) + optional semantic reranking via Ollama
+      `/api/embed`, with the embedding model configurable and the feature
+      degrading cleanly to BM25 when absent.
+- [ ] Chunking preserves provenance: every chunk resolves back to its
+      `source`, `retrievedAt`, `verified`.
+- [ ] `knowledge_search` returns ranked, cited snippets; the tool result is still
+      wrapped as `UNTRUSTED DATA`.
+- [ ] Acceptance: a query whose answer shares no literal term with the stored
+      text is still found (semantic path), and a literal-term query is found
+      without embeddings (BM25 path) — both asserted, not asserted-together.
+
+### M3 — Multi-architecture agents ⬜
+
+**Why.** ReAct alone is the wrong shape for structured work (Plan-Execute) and
+for hard reasoning (ToT). The goal names all four architectures.
+
+All strategies live behind the existing `Planner` interface; **ReAct stays the
+default**, so nothing regresses.
+
+- [ ] **Plan-Execute:** an explicit plan artifact (steps) produced before acting,
+      executed step by step, with bounded replanning on failure. The plan is
+      visible in the trajectory and the event timeline.
+- [ ] **Reflexion:** bounded self-critique that fires **only when an external
+      signal exists** (test/lint/compiler output). Free-floating self-reflection
+      is rejected by design (ADR 001) — this milestone must not weaken that rule.
+- [ ] **Tree-of-Thoughts:** opt-in bounded branching with an explicit node budget
+      and a scoring signal; off by default, because it multiplies cost.
+- [ ] Acceptance per strategy: a task that ReAct fails and the new strategy
+      passes, asserted against a **real** external signal; plus a test that the
+      strategy cannot exceed its budget.
+
+### M4 — MCP integration ⬜
+
+**Why.** The largest structural gap: AURORA cannot reach the MCP ecosystem.
+Research is done (`docs/research/mcp.md`); there is no code.
+
+**Verified (2026-09-29):** `@modelcontextprotocol/sdk` **1.31.0** is published.
+
+- [ ] MCP **client**: connect to configured servers over stdio and HTTP,
+      discover tools, and adapt them into the AURORA `ToolRegistry`.
+- [ ] Permission mapping is explicit and fail-closed: an MCP tool gets a
+      declared AURORA permission, or it is not registered. An unknown tool is
+      never silently `FULL_ACCESS`.
+- [ ] MCP output is untrusted: every result is wrapped as `UNTRUSTED DATA` with a
+      fresh nonce, and the confirmation gate applies to mutating MCP tools.
+- [ ] Servers are config-driven and **opt-in**; `AURORA_MCP_SERVERS` unset
+      restores today's registry exactly.
+- [ ] Acceptance: a local MCP server's tool is discovered, called through the
+      registry, and its output is provably wrapped as untrusted data; a
+      mutating MCP tool is denied without a terminal.
+
+### M5 — Concurrency & durable runs ⬜
+
+**Why.** Sequential sub-agents waste a workstation's capacity, and in-process
+API runs vanish on restart (assessment §13.7).
+
+- [ ] Bounded parallel sub-agent execution (a pool, not unbounded `Promise.all`),
+      with per-run budgets still enforced and results still isolated.
+- [ ] API runs are durable: a run survives a restart, and an interrupted run is
+      recovered through the existing `TaskStore` lifecycle (ADR 008) rather than
+      a new mechanism.
+- [ ] Acceptance: a restart mid-run is recovered (real second process, not a
+      flag), and parallel delegation is proven faster than sequential on the same
+      host — measured, not asserted.
+
+### M6 — Execution isolation ⬜
+
+**Why.** `CommandValidator` is a *gate*, not isolation. The goal says
+production-grade; a command allowlist is not a sandbox.
+
+- [ ] An opt-in isolation backend for `run_command`/`run_tests` (container or
+      namespace), behind the existing `ExecutionProvider` interface, so the
+      local `spawn` path stays the default for single-user local use.
+- [ ] A written threat model of what the local path does and does not protect
+      against, so the residual risk is stated rather than implied.
+- [ ] Observations can be redacted before they reach the model (opt-in), closing
+      assessment §13.10 — off by default so fixtures keep working, with the
+      trade-off documented.
+- [ ] Acceptance: an escape attempt that succeeds on the local path fails inside
+      the isolated backend; the default path is unchanged.
+
+### M7 — Operator experience & evaluation ⬜
+
+**Why.** A workstation needs an evaluation harness, or "it works" is an opinion.
+
+- [ ] An eval suite: a fixed set of tasks with pass/fail, runnable in CI, with a
+      regression gate on the pass rate.
+- [ ] UI: plan/trajectory view for Plan-Execute, and a retrieval-aware knowledge
+      browser for M2.
+- [ ] Metrics: per-run latency, token use, tool-call counts, verification
+      outcomes — surfaced, not just logged.
+- [ ] Acceptance: the eval suite detects a deliberately introduced regression
+      (a mutation that lowers the pass rate) and fails the gate.
+
+### M8 — Multi-tenant deployment ⏭️
+
+**Deferred.** AURORA is local-first and single-operator; multi-token auth and
+per-tenant scoping solve a problem it does not have. Revisit only if the goal
+changes from "local workstation" to "hosted service".
+
+## Definition of done for the goal
+
+The goal is reached when all of the following hold, each with a test:
+
+1. Four architectures selectable per task (M3), ReAct still the default.
+2. Retrieval is hybrid and local, with no new runtime dependency (M2).
+3. MCP tools are usable and permission-mapped fail-closed (M4).
+4. Parallel delegation is bounded and API runs survive restart (M5).
+5. Execution can be isolated, and the residual risk of the local path is
+   documented (M6).
+6. An eval suite gates regressions (M7).
+7. Every live claim is backed by a test run against a **local** model, and every
+   unverified claim is still tagged **DOĞRULANACAK**.
+
+> Same rule as the phases: no milestone is advanced until the previous
+> milestone's acceptance criteria are met and its tests pass.

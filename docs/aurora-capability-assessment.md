@@ -376,7 +376,26 @@ Ortam değişkenleriyle tam yapılandırma; şema `zod` ile başlangıçta doğr
 ## 13. Bilinen Boşluklar, Riskler ve DOĞRULANACAK Noktalar
 
 Aşağıdakiler, projeyi değerlendirecek uzmanın özellikle bakması gereken
-noktalardır:
+noktalardır. **Her boşluk, `docs/roadmap.md` "Post-Phase-10 roadmap" bölümünde
+bir kilometre taşına (M1–M7) bağlanmıştır** — hangi işin neyi kapatacağı ve
+kabul kriteri orada yazılıdır.
+
+| # | Boşluk | Hedef |
+|---|---|---|
+| 1 | MCP yok | **M4** |
+| 2 | RAG yok (keyword-only) | **M2** |
+| 3 | Konfigürasyon varsayılanı tutarsızlığı (`llama3.2`) | **M1** |
+| 4 | Planner ince | **M3** (Plan-Execute) |
+| 5 | Dallanma yok (ToT) | **M3** |
+| 6 | Alt-ajan paralelliği yok | **M5** |
+| 7 | API run'ları kalıcı değil | **M5** |
+| 8 | Sandbox yok | **M6** |
+| 9 | Tek kullanıcı token'ı | **M8** (ertelendi) |
+| 10 | Redaksiyon sınırı (gözlem metni) | **M6** |
+| 11 | Model kabiliyeti bağımlılığı | **M1** |
+| 12 | `DOĞRULANACAK` işaretleri; `ui/app.js` test edilmiyor | **M0** (kalan) + **M7** |
+
+Ayrıntılı liste:
 
 1. **MCP yok** — Sadece araştırma dokümanı. Ekosistem uyumluluğu için en büyük yapısal boşluk.
 2. **RAG yok** — Keyword-only arama; ölçekte isabet düşer. Embedding/hybrid arama DOĞRULANACAK.
