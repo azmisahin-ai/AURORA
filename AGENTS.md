@@ -245,6 +245,58 @@ first, then drains the queue. `AURORA_TASK_DIR` (default `./tasks`),
 cross-process lock, and two processes sharing a task directory are not
 supported. Documented rather than papered over with an advisory lock.
 
+## Memory tiers and bounded context (Phase 7)
+
+Three memory tiers (`docs/adr/009-memory-and-bounded-context.md`):
+
+| Tier | Scope | Storage | Where |
+|---|---|---|---|
+| Working | current run's transcript | in-memory | `InMemoryWorkingMemory` |
+| Session | one conversation | file (one JSON per record) | `FileSessionStore` |
+| Knowledge | cross-session research | filesystem, **tool-driven** | `FileKnowledgeStore` (Phase 3) |
+
+The Knowledge tier is **not** duplicated; retrieval stays behind
+`knowledge_search` because "which retrieval mechanism" is an open question.
+
+`AgentLoop` keeps the full transcript in `messages`; each provider call gets a
+*bounded view* from `ContextBuilder` (port `ContextPort`, so `core/agent` does
+not depend on the concrete builder). Compaction order, cheapest and least-lossy
+first: (1) in budget → unchanged, (2) shorten oversized tool observations (head
++ tail, visible marker), (3) elide whole oldest **turns**, (4) still over →
+report `overBudget`, never drop the task. Individual messages are never split
+from their `tool_calls` — providers reject an orphaned `tool` message.
+
+The **protected head** is the leading run of `system`/`user` messages (system
+prompt, recall block, task), *counted dynamically* — a fixed count would stop
+protecting the task the moment recall was added. The omission notice goes after
+the head, never into the system prompt (the trust anchor, ADR 004).
+
+`FileSessionStore` writes atomically (temp + `rename`, the Phase 6 lesson) and
+is single-process. `SessionRecord` is an auditable **extract**, not a
+transcript. `buildSessionRecall` is **extractive, never model-generated**: a
+model summary would re-enter context as unverified fact (ADR 001); model
+summarisation stays DOĞRULANACAK. The recall block is wrapped by `wrapUntrusted`
+(nonce + size cap) and injected by `AgentLoop` as a **user** message *before* the
+task, so the task stays the last instruction.
+
+`AgentRuntime.runTask` recalls, runs, then persists. `recall()` returns
+`undefined` when disabled or nothing is stored, so a first run is identical to
+pre-Phase-7. A session save failure is logged and never fails the run.
+
+Env: `AURORA_SESSION_DIR` (default `./sessions`), `AURORA_RECALL_SESSIONS`
+(default 3; 0 disables). Context uses the existing `AURORA_TOKEN_BUDGET`.
+CLI: `aurora sessions list | show | recall`; `run` gained `--recall-sessions`,
+`--no-recall`, `--context-budget`.
+
+Measured with the real builder (4 KB observations, 8 000-token budget): 200
+turns / 203 414 raw tokens → 7 181 bounded tokens. Raw history grows linearly;
+the bounded view plateaus.
+
+**Timeout correctness:** the loop marks a timeout with a `timedOut` flag rather
+than re-deriving it from `Date.now() >= deadline`; `setTimeout` can fire a hair
+before the clock reaches the deadline, which mislabelled a genuine timeout as
+`aborted` (intermittent, cold-start only).
+
 ## Test harness note
 
 `vitest.config.ts` sets `fileParallelism: false`. All five live integration

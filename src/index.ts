@@ -27,3 +27,11 @@ export type {
   TaskStatus,
   TaskStore,
 } from "./core/task/index.js";
+export { ContextBuilder, HeuristicTokenEstimator } from "./core/context/index.js";
+export type { ContextPlan, TokenEstimator } from "./core/context/index.js";
+export { FileSessionStore, InMemoryWorkingMemory, buildSessionRecall } from "./core/memory/index.js";
+export type {
+  SessionRecord,
+  SessionStore,
+  WorkingMemory,
+} from "./core/memory/index.js";

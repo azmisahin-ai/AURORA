@@ -112,6 +112,26 @@ export interface RunResult {
    * delegated edit (ADR 006).
    */
   mutatedWorkspace?: boolean;
+  /** Context-management activity for this run (Phase 7). */
+  context?: ContextStats;
+}
+
+/**
+ * Minimal port for bounded context construction (Phase 7, ADR 009). The loop
+ * owns the full transcript; the port decides what subset fits the budget.
+ * Kept an interface so `core/agent` does not depend on the concrete builder.
+ */
+export interface ContextPort {
+  build(messages: readonly ChatMessage[]): import("../context/types.js").ContextPlan;
+}
+
+export interface ContextStats {
+  /** How many times the transcript had to be compacted during this run. */
+  compactions: number;
+  /** Estimated tokens in the last provider call. */
+  finalTokens?: number;
+  /** True when the last call could not be brought within budget. */
+  overBudget?: boolean;
 }
 
 export interface AgentLoopDeps {
@@ -120,6 +140,18 @@ export interface AgentLoopDeps {
   planner: { update(ctx: import("../planner/types.js").PlanContext): PlanStep };
   /** Optional in Phase 1; required once tools exist. */
   tools?: ToolExecutor;
+  /**
+   * Optional context builder. When present, each provider call is made with a
+   * *bounded* view of the transcript instead of the full history (ADR 009).
+   * The full transcript is kept in working memory; only the view is trimmed.
+   */
+  contextBuilder?: ContextPort;
+  /**
+   * Optional untrusted-wrapped summary of prior sessions, injected as a `user`
+   * message before the task (ADR 009). Never a system message: prior-session
+   * text is data, not authority (ADR 004).
+   */
+  sessionRecall?: string;
   /**
    * Optional external verifier. When present *and* `limits.maxVerifications`
    * is set, the loop runs it after the model claims completion; a failing

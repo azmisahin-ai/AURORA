@@ -8,13 +8,30 @@ import { buildProgram } from "../../src/cli/index.js";
  */
 
 describe("CLI wiring", () => {
-  it("registers run, research, knowledge and tasks", () => {
+  it("registers run, research, knowledge, tasks and sessions", () => {
     const names = buildProgram()
       .commands.map((c) => c.name());
     expect(names).toContain("run");
     expect(names).toContain("research");
     expect(names).toContain("knowledge");
     expect(names).toContain("tasks");
+    expect(names).toContain("sessions");
+  });
+
+  it("exposes sessions list, show and recall", () => {
+    const program = buildProgram();
+    const sessions = program.commands.find((c) => c.name() === "sessions")!;
+    const sub = sessions.commands.map((c) => c.name());
+    expect(sub).toEqual(expect.arrayContaining(["list", "show", "recall"]));
+  });
+
+  it("exposes the Phase 7 context and recall options on run", () => {
+    const program = buildProgram();
+    const run = program.commands.find((c) => c.name() === "run")!;
+    const flags = run.options.map((o) => o.long);
+    expect(flags).toContain("--recall-sessions");
+    expect(flags).toContain("--context-budget");
+    expect(flags).toContain("--no-recall");
   });
 
   it("exposes tasks add, list, show, recover and run", () => {

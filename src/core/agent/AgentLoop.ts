@@ -38,20 +38,31 @@ export class AgentLoop {
 
     const messages: ChatMessage[] = [
       { role: "system", content: this.deps.systemPrompt ?? DEFAULT_SYSTEM_PROMPT },
+      // Prior-session recall, when present, is a *user* message: it is data
+      // (ADR 004). It precedes the task so the task remains the last word.
+      ...(this.deps.sessionRecall
+        ? [{ role: "user" as const, content: this.deps.sessionRecall }]
+        : []),
       { role: "user", content: task },
     ];
 
     const trajectory: TrajectoryEntry[] = [];
-    const deadline = Date.now() + limits.timeoutMs;
 
-    // One controller governs both the caller's signal and the deadline.
+    // One controller governs both the caller's signal and the deadline. The
+    // timeout is recorded in a flag rather than re-derived by comparing wall
+    // clocks: `setTimeout` can fire a hair before `Date.now()` reaches the
+    // deadline, which would misreport a genuine timeout as an external abort.
+    let timedOut = false;
     const controller = new AbortController();
     const onExternalAbort = () => controller.abort();
     if (opts.signal) {
       if (opts.signal.aborted) controller.abort();
       else opts.signal.addEventListener("abort", onExternalAbort, { once: true });
     }
-    const timeoutTimer = setTimeout(() => controller.abort(), limits.timeoutMs);
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, limits.timeoutMs);
 
     let iterations = 0;
     let toolCallCount = 0;
@@ -59,9 +70,34 @@ export class AgentLoop {
     let verificationCount = 0;
     let lastVerification: VerificationOutcome | undefined;
     let hasMutated = false;
+    let compactions = 0;
+    let lastPlan: import("../context/types.js").ContextPlan | undefined;
 
     const maxVerifications = limits.maxVerifications ?? 0;
     const verificationEnabled = maxVerifications > 0 && this.deps.verifier !== undefined;
+
+    // The full transcript lives in `messages`; each provider call gets a
+    // budget-bounded view (ADR 009). No builder → the view is the transcript,
+    // which preserves the pre-Phase-7 behaviour exactly.
+    const view = (): ChatMessage[] => {
+      if (!this.deps.contextBuilder) return messages;
+      const plan = this.deps.contextBuilder.build(messages);
+      lastPlan = plan;
+      if (plan.actions.some((a) => a.kind === "elide-turns" || a.kind === "truncate-observation")) {
+        compactions++;
+        logger?.debug(
+          { originalTokens: plan.originalTokens, finalTokens: plan.finalTokens, budget: plan.budget },
+          "context compacted",
+        );
+      }
+      if (plan.overBudget) {
+        logger?.warn(
+          { finalTokens: plan.finalTokens, budget: plan.budget },
+          "context still over budget after compaction",
+        );
+      }
+      return plan.messages;
+    };
 
     const finish = (status: RunStatus, error?: string): RunResult => ({
       status,
@@ -73,12 +109,16 @@ export class AgentLoop {
       ...(verificationCount > 0 ? { verifications: verificationCount } : {}),
       ...(lastVerification !== undefined ? { lastVerification } : {}),
       ...(hasMutated ? { mutatedWorkspace: true } : {}),
+      context: {
+        compactions,
+        ...(lastPlan ? { finalTokens: lastPlan.finalTokens, overBudget: lastPlan.overBudget } : {}),
+      },
     });
 
     try {
       while (iterations < limits.maxIterations) {
         if (controller.signal.aborted) {
-          return finish(Date.now() >= deadline ? "timeout" : "aborted");
+          return finish(timedOut ? "timeout" : "aborted");
         }
         iterations++;
 
@@ -87,13 +127,13 @@ export class AgentLoop {
         try {
           const offeredTools = tools?.definitions?.() ?? [];
           turn = await llm.chat({
-            messages,
+            messages: view(),
             ...(offeredTools.length > 0 ? { tools: offeredTools } : {}),
             signal: controller.signal,
           });
         } catch (cause) {
           if (cause instanceof LLMError && controller.signal.aborted) {
-            return finish(Date.now() >= deadline ? "timeout" : "aborted");
+            return finish(timedOut ? "timeout" : "aborted");
           }
           const message = cause instanceof Error ? cause.message : String(cause);
           logger?.error({ err: message }, "llm call failed");

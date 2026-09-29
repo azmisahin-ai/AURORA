@@ -11,7 +11,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
 | 4 | Code Execution + Verification | Phase 3 | 3–4 gün | ✅ |
 | 5 | Sub-Agent System | Phase 4 | 3–4 gün | ✅ |
 | 6 | Persistence + Task Recovery | Phase 5 | 2–3 gün | ✅ |
-| 7 | Context + Memory | Phase 6 | 2–3 gün | ⬜ |
+| 7 | Context + Memory | Phase 6 | 2–3 gün | ✅ |
 | 8 | Security Hardening | Phase 7 | 3–4 gün | ⬜ |
 | 9 | CLI + API | Phase 8 | 2–3 gün | ⬜ |
 | 10 | UI (ayrı katman) | Phase 9 | 4–5 gün | ⬜ |
@@ -153,3 +153,42 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
       requeued/exhausted/corrupt counts.
 
 > No phase is advanced until the previous phase's acceptance criteria are met.
+
+## Phase 7 acceptance
+
+- [x] Context is bounded, not concatenated: each provider call is built by
+      `ContextBuilder` against `AURORA_TOKEN_BUDGET`, while the loop keeps the
+      full transcript. Measured on this host (4 KB observations, 8 000-token
+      budget): 200 turns / 203 414 raw tokens → 7 181 bounded tokens
+      (`docs/adr/009-memory-and-bounded-context.md`).
+- [x] Compaction is ordered cheapest-and-least-lossy first: oversized tool
+      observations are shortened (head + tail with a visible marker), then
+      whole *turns* are elided oldest-first. Individual messages are never
+      split from their `tool_calls` (`tests/unit/context/context-builder.test.ts`).
+- [x] The system prompt, the recall block, and the task (the leading
+      system/user run) survive every compaction. The protected head is counted
+      dynamically, not fixed, so adding recall cannot silently unprotect the
+      task. The omission notice is inserted after the head, never into the
+      system prompt.
+- [x] A transcript that still exceeds budget after every legal elision is
+      reported (`overBudget`); the task is never dropped to fit.
+- [x] Three memory tiers exist and are distinct: Working (in-memory transcript),
+      Session (durable JSON records), Knowledge (Phase 3, tool-driven). The
+      Knowledge tier is not duplicated.
+- [x] Session records are durable across a real restart: a second runtime reads
+      prior sessions from disk only
+      (`tests/integration/session-memory.test.ts`; live:
+      `tests/integration/memory-live.test.ts`).
+- [x] Recall is *extractive*, not model-generated, and re-enters context wrapped
+      as UNTRUSTED user data (nonce-delimited, size-capped) — never a system
+      message. Model-based summarisation stays DOĞRULANACAK (ADR 009).
+- [x] Session persistence cannot fail a run: a save error is logged and the
+      run's output is returned unchanged.
+- [x] Live end-to-end against real Ollama: a real run's session is written to
+      disk and recalled by a fresh runtime, asserted on the record and recall
+      block, not on model prose (`tests/integration/memory-live.test.ts`).
+- [x] CLI: `sessions list | show | recall`; `run` gained `--recall-sessions`,
+      `--no-recall`, `--context-budget`.
+
+> No phase is advanced until the previous phase's acceptance criteria are met.
+

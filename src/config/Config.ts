@@ -38,6 +38,13 @@ export const ConfigSchema = z.object({
   taskDir: z.string().min(1).default("./tasks"),
   taskMaxAttempts: z.coerce.number().int().positive().default(3),
 
+  // Memory (Phase 7). Session records are the durable "session" tier; recall
+  // injects a bounded summary of the most recent prior sessions into a new run.
+  // 0 disables recall. Recall is a no-op when no sessions exist yet, so the
+  // default does not change first-run behaviour.
+  sessionDir: z.string().min(1).default("./sessions"),
+  recallSessions: z.coerce.number().int().min(0).default(3),
+
   // Web research. `noop` means no search backend is configured; research then
   // falls back to fetching known URLs, which is a degraded mode, not an error.
   searchProvider: z.enum(["noop"]).default("noop"),
@@ -100,6 +107,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
     taskDir: env.AURORA_TASK_DIR,
     taskMaxAttempts: env.AURORA_TASK_MAX_ATTEMPTS,
+
+    sessionDir: env.AURORA_SESSION_DIR,
+    recallSessions: env.AURORA_RECALL_SESSIONS,
 
     searchProvider: env.AURORA_SEARCH_PROVIDER,
     fetchTimeoutMs: env.AURORA_FETCH_TIMEOUT_MS,

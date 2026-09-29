@@ -105,13 +105,41 @@ TaskStore ── claimNext() ──▶ TaskRunner ── TaskExecutor port ─�
 - **Layering holds** — `core/task` drives work through a `TaskExecutor` port;
   `AgentRuntime` supplies the adapter. No provider import.
 
-## 5. Memory tiers (Phase 7)
+## 5. Memory tiers (Phase 7, ADR 009)
 
 | Tier | Scope | Storage |
 |---|---|---|
-| Working | current task | in-memory |
-| Session | one conversation | file (JSON) |
-| Knowledge | cross-session | filesystem + metadata |
+| Working | current run's transcript | in-memory |
+| Session | one conversation | file (one JSON per record) |
+| Knowledge | cross-session | filesystem + metadata (ADR 002, tool-driven) |
+
+```
+AgentLoop ── full transcript (messages) ──┐
+                                          ▼
+                            ContextBuilder (bounded view per provider call)
+                            1. in budget → unchanged
+                            2. oversized tool observations shortened
+                            3. oldest middle turns elided; head + tail kept
+                            4. still over budget → reported, task never dropped
+
+AgentRuntime.runTask ──▶ recall() ──▶ buildSessionRecall ──▶ wrapUntrusted
+     │                        ▲                                   │
+     └── after run ──▶ FileSessionStore (temp + rename)      injected as a
+                                                              USER message
+```
+
+- **Session records are extracts, not transcripts** — task, status, tools,
+  truncated answer, counters. Written atomically (temp + `rename`, the Phase 6
+  lesson) and read back by a later process purely from disk.
+- **Recall is extractive, never model-generated** — a deterministic assembly of
+  stored fields. A generated summary would re-enter context as unverified fact
+  (ADR 001); model summarisation stays DOĞRULANACAK.
+- **Recall re-enters as UNTRUSTED user data** — nonce-wrapped and size-capped
+  (ADR 004), injected *before* the task so the task stays the last instruction.
+- **Bounded, not faithful** — the loop keeps the full transcript; only the
+  provider call is trimmed. Compaction is lossy in a stated order, cheapest and
+  least-lossy first, and never removes the system prompt, the recall block, or
+  the task.
 
 ## 6. Knowledge layout (ADR 002)
 
@@ -149,6 +177,9 @@ This repository is being built phase by phase. As of the Phase 6 report:
   toolsets, delegation as a tool, delegated-edit verification: complete.
 - **Phase 6** — durable tasks: atomic records, checked transitions, bounded
   restart recovery, `tasks` CLI: complete.
+- **Phase 7** — memory tiers and bounded context: session records on disk,
+  extractive untrusted recall, budget-bounded provider calls, `sessions` CLI:
+  complete.
 
 ### Environment constraints observed during the build
 
