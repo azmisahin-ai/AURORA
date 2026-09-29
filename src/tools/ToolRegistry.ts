@@ -12,6 +12,7 @@ import type { KeyedRateLimiter } from "../security/RateLimiter.js";
 import { SecretRedactor } from "../security/SecretRedactor.js";
 import { coerceArguments } from "./coerce.js";
 import type { Tool, ToolContext } from "./types.js";
+import { NULL_EVENT_BUS, type EventEmitterPort } from "../events/index.js";
 
 export interface ToolRegistryOptions {
   permissions: PermissionManager;
@@ -20,6 +21,14 @@ export interface ToolRegistryOptions {
   commandValidator: CommandValidator;
   execution: ExecutionProvider;
   logger: Logger;
+  /**
+   * Event sink for capability visibility (M0, CAP-004). Defaults to a no-op, so
+   * a registry without a bus behaves exactly as it did before events existed.
+   */
+  events?: EventEmitterPort;
+  /** Correlates emitted events. Empty when the registry is not run-scoped. */
+  runId?: string;
+  taskId?: string;
   /**
    * Asked before a state-changing tool runs (Phase 8). Defaults to
    * `AllowAllGate`: an unattended run should not deadlock on a prompt, and the
@@ -125,8 +134,26 @@ export class ToolRegistry implements ToolExecutor {
     return decision.allowed ? [] : decision.missing;
   }
 
-  async execute(call: ToolCall, signal?: AbortSignal): Promise<ToolExecutionResult> {
+  async execute(
+    call: ToolCall,
+    signal?: AbortSignal,
+    scope?: import("../core/agent/types.js").ToolExecutionScope,
+  ): Promise<ToolExecutionResult> {
     const { logger } = this.options;
+    const emit = (
+      type: string,
+      payload: unknown,
+      origin: string,
+    ): void => {
+      const bus = scope?.events ?? this.options.events ?? NULL_EVENT_BUS;
+      bus.emit({
+        type,
+        source: origin,
+        runId: scope?.runId ?? this.options.runId ?? "",
+        taskId: scope?.taskId ?? this.options.taskId ?? "",
+        payload,
+      });
+    };
     const tool = this.tools.get(call.name);
     if (!tool) {
       logger.warn({ tool: call.name }, "tool call for unknown tool rejected");
@@ -138,6 +165,11 @@ export class ToolRegistry implements ToolExecutor {
       logger.warn(
         { tool: call.name, missing: decision.missing, granted: this.options.permissions.list() },
         "tool call denied: missing permissions",
+      );
+      emit(
+        "tool.failed",
+        { tool: call.name, reason: "permission_denied", missing: decision.missing },
+        "tool-registry",
       );
       return {
         ok: false,
@@ -200,7 +232,8 @@ export class ToolRegistry implements ToolExecutor {
     }
 
     // Confirmation gate for state-changing calls. The three outcomes are kept
-    // distinct; only an explicit denial stops the call.
+    // distinct; only an explicit denial stops the call. Emission makes the
+    // approval visible in the UI rather than an invisible internal decision.
     const gate = this.options.confirmationGate;
     if (gate !== undefined && requiresConfirmation(tool)) {
       // Summarise the *redacted* arguments, so a summary can never leak a
@@ -208,22 +241,51 @@ export class ToolRegistry implements ToolExecutor {
       const safeArgs = this.options.redactor
         ? this.options.redactor.redactValue(parsed.data)
         : parsed.data;
+      const summary = summarizeCall(tool, safeArgs);
+      emit(
+        "approval.requested",
+        { tool: call.name, gate: gate.name, summary, arguments: safeArgs },
+        "tool-registry",
+      );
       const outcome = await gate.request({
         tool: call.name,
-        summary: summarizeCall(tool, safeArgs),
+        summary,
         arguments: safeArgs,
       });
       if (outcome === "denied") {
         logger.warn({ tool: call.name, args: safeArgs, gate: gate.name }, "tool call denied by confirmation gate");
+        emit(
+          "approval.denied",
+          { tool: call.name, gate: gate.name, summary, arguments: safeArgs },
+          "tool-registry",
+        );
         return {
           ok: false,
           observation: `User denied permission to run "${call.name}". This denial is recorded.`,
+          denied: true,
         };
       }
       if (outcome === "unavailable") {
         logger.info({ tool: call.name, gate: gate.name }, "confirmation unavailable; proceeding under policy");
+        emit(
+          "approval.unavailable",
+          { tool: call.name, gate: gate.name, summary },
+          "tool-registry",
+        );
+      } else {
+        emit(
+          "approval.approved",
+          { tool: call.name, gate: gate.name, summary, arguments: safeArgs },
+          "tool-registry",
+        );
       }
     }
+
+    emit(
+      "tool.requested",
+      { tool: call.name, arguments: parsed.data },
+      "tool-registry",
+    );
 
     const ctx: ToolContext = {
       workspace: this.options.workspace,
@@ -238,9 +300,20 @@ export class ToolRegistry implements ToolExecutor {
     const started = Date.now();
     try {
       const result = await tool.execute(parsed.data, ctx);
+      const ms = Date.now() - started;
       logger.debug(
-        { tool: call.name, ok: result.ok, ms: Date.now() - started },
+        { tool: call.name, ok: result.ok, ms },
         "tool executed",
+      );
+      emit(
+        result.ok ? "tool.completed" : "tool.failed",
+        {
+          tool: call.name,
+          ok: result.ok,
+          ms,
+          ...(result.ok ? {} : { observation: truncate(result.output, 500) }),
+        },
+        "tool-registry",
       );
       return {
         ok: result.ok,
@@ -256,9 +329,19 @@ export class ToolRegistry implements ToolExecutor {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       logger.error({ tool: call.name, err: message }, "tool threw");
+      emit(
+        "tool.failed",
+        { tool: call.name, reason: "threw", error: message },
+        "tool-registry",
+      );
       return { ok: false, observation: `Tool "${call.name}" failed: ${message}` };
     }
   }
+}
+
+/** Bound an observation string before it goes into an event payload. */
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
 /**

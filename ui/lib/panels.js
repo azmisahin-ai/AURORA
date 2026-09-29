@@ -5,11 +5,13 @@
 
 import { el, externalLink } from "./dom.js";
 import {
+  eventClass,
   formatAge,
   formatDuration,
   formatStep,
   formatTime,
   statusClass,
+  summarizeEvent,
   summarizeTrajectory,
   truncate,
 } from "./format.js";
@@ -273,6 +275,36 @@ export function knowledgeDetail(entry) {
         ]
       : []),
   ];
+}
+
+/**
+ * Live event timeline (M0, CAP-004). Newest last, so reading top-to-bottom is
+ * reading forward in time. `events` arrives from the SSE stream; every field is
+ * untrusted text and is rendered with `textContent`.
+ */
+export function eventTimeline(events) {
+  const list = Array.isArray(events) ? events : [];
+  if (list.length === 0) return empty("Waiting for events…");
+  const nodes = [];
+  let lastSeq = null;
+  for (const event of list) {
+    // Sequences are gap-free on the wire; a jump means the replay ring dropped
+    // what came between, so say so rather than draw a seamless-looking line.
+    if (lastSeq !== null && event.sequence > lastSeq + 1) {
+      nodes.push(el("li", { class: "ev-gap", text: `… events ${lastSeq + 1}–${event.sequence - 1} dropped` }));
+    }
+    lastSeq = event.sequence;
+    const summary = summarizeEvent(event);
+    nodes.push(
+      el("li", { class: `ev ${eventClass(event.type)}` }, [
+        el("span", { class: "ev-seq", text: `#${event.sequence}` }),
+        el("span", { class: "ev-type", text: event.type ?? "?" }),
+        ...(summary ? [el("span", { class: "ev-summary", text: summary })] : []),
+        el("span", { class: "ev-time", text: formatTime(event.timestamp) }),
+      ]),
+    );
+  }
+  return el("ul", { class: "events" }, nodes);
 }
 
 /** `JSON.stringify` that cannot throw on a circular or exotic value. */

@@ -31,6 +31,8 @@ export interface RuntimeOptions {
   contextBuilder?: ContextBuilder | null;
   /** Confirmation gate for state-changing tools (Phase 8). */
   confirmationGate?: ConfirmationGate;
+  /** Event sink for capability visibility (M0, CAP-004). No-op when absent. */
+  events?: import("../../events/index.js").EventEmitterPort;
 }
 
 /**
@@ -47,11 +49,13 @@ export class AgentRuntime {
   readonly sessions: SessionStore;
   private readonly tools: ToolExecutor;
   private readonly contextBuilder?: ContextBuilder;
+  private readonly events?: import("../../events/index.js").EventEmitterPort;
 
   constructor(opts: RuntimeOptions = {}) {
     this.config = opts.config ?? loadConfig();
     this.logger = opts.logger ?? createLogger(this.config.logLevel);
     this.llm = opts.llm ?? createLLMProvider(this.config);
+    this.events = opts.events;
     this.sessions =
       opts.sessionStore ?? new FileSessionStore({ dir: this.config.sessionDir });
     this.contextBuilder =
@@ -93,7 +97,7 @@ export class AgentRuntime {
     }
   }
 
-  createLoop(opts: { sessionRecall?: string } = {}): AgentLoop {
+  createLoop(opts: { sessionRecall?: string; runId?: string; taskId?: string } = {}): AgentLoop {
     return new AgentLoop({
       llm: this.llm,
       planner: new Planner(),
@@ -101,6 +105,10 @@ export class AgentRuntime {
       ...(this.verifier !== undefined ? { verifier: this.verifier } : {}),
       ...(this.contextBuilder !== undefined ? { contextBuilder: this.contextBuilder } : {}),
       ...(opts.sessionRecall !== undefined ? { sessionRecall: opts.sessionRecall } : {}),
+      ...(this.events !== undefined ? { events: this.events } : {}),
+      ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
+      ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
+      modelName: this.config.model,
       limits: {
         maxIterations: this.config.maxIterations,
         maxToolCalls: this.config.maxToolCalls,
@@ -129,7 +137,11 @@ export class AgentRuntime {
    */
   async runTask(task: string, opts: RunOptions = {}): Promise<RunResult> {
     const sessionRecall = await this.recall();
-    const loop = this.createLoop(sessionRecall !== undefined ? { sessionRecall } : {});
+    const loop = this.createLoop({
+      ...(sessionRecall !== undefined ? { sessionRecall } : {}),
+      ...(opts.runId !== undefined ? { runId: opts.runId } : {}),
+      ...(opts.taskId !== undefined ? { taskId: opts.taskId } : {}),
+    });
     const result = await loop.run(task, opts);
     await this.saveSession(task, result);
     return result;

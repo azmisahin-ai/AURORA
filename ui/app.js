@@ -10,6 +10,7 @@ import { api, ApiError, getToken, setToken } from "./lib/api.js";
 import { clear, el, render } from "./lib/dom.js";
 import { KNOWLEDGE_KINDS, TASK_STATUSES } from "./lib/format.js";
 import {
+  eventTimeline,
   knowledgeDetail,
   knowledgeList,
   runDetail,
@@ -19,6 +20,8 @@ import {
 } from "./lib/panels.js";
 
 const POLL_MS = 4000;
+/** Cap the in-memory timeline so a long run cannot grow the tab without bound. */
+const MAX_EVENTS = 500;
 
 const state = {
   view: "tasks",
@@ -32,6 +35,11 @@ const state = {
   selectedKnowledge: null,
   error: null,
   timer: null,
+  // Live event stream for the selected run (M0, CAP-004).
+  events: [],
+  eventsFor: null,
+  eventGap: false,
+  unsubscribe: null,
 };
 
 const dom = {};
@@ -107,6 +115,13 @@ function selectView(view) {
   dom.taskFilter.classList.toggle("hidden", !showTaskFilter);
   dom.knowledgeFilter.classList.toggle("hidden", !showKnowledgeFilter);
   dom.taskForm.classList.toggle("hidden", view !== "tasks");
+  // Leaving the agent view drops the live subscription; a stream nobody is
+  // rendering is a leak, not a feature.
+  if (view !== "agents") {
+    stopEventStream();
+    state.selectedRunId = null;
+    currentRun = null;
+  }
   clear(dom.detail);
   void refresh();
 }
@@ -173,12 +188,55 @@ async function showTask(id) {
 
 async function showRun(id) {
   state.selectedRunId = id;
+  stopEventStream();
+  state.events = [];
+  state.eventsFor = id;
+  state.eventGap = false;
   try {
     const run = await api.getRun(id);
-    render(dom.detail, runDetail(run));
+    renderRunDetail(run);
   } catch (cause) {
     render(dom.detail, [el("p", { class: "danger", text: `Could not load run: ${message(cause)}` })]);
+    return;
   }
+  // Subscribe after the snapshot is on screen, so the timeline reads as a
+  // continuation of it rather than racing the initial fetch.
+  state.unsubscribe = api.streamRunEvents(id, {
+    onEvent: (event) => {
+      if (state.selectedRunId !== id) return;
+      state.events.push(event);
+      if (state.events.length > MAX_EVENTS) state.events.splice(0, state.events.length - MAX_EVENTS);
+      renderRunDetail(currentRun);
+    },
+    onGap: () => {
+      state.eventGap = true;
+    },
+  });
+}
+
+/** The last run record fetched by polling/list; used when re-rendering detail. */
+let currentRun = null;
+
+function renderRunDetail(run) {
+  if (run !== null && run !== undefined) currentRun = run;
+  if (state.selectedRunId === null) return;
+  const base = runDetail(currentRun);
+  render(dom.detail, [
+    ...base,
+    el("h3", { text: "Live events" }),
+    el("p", {
+      class: "muted",
+      text: state.eventGap
+        ? "Some events were dropped (reconnect gap); the timeline may be incomplete."
+        : "Streaming over SSE; reconnects automatically.",
+    }),
+    eventTimeline(state.events),
+  ]);
+}
+
+function stopEventStream() {
+  if (typeof state.unsubscribe === "function") state.unsubscribe();
+  state.unsubscribe = null;
 }
 
 async function showKnowledge(entry) {

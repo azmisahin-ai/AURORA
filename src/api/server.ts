@@ -30,6 +30,11 @@ export interface ApiDeps {
    * scrubbed here too.
    */
   redactor?: SecretRedactor;
+  /**
+   * Event bus backing the live stream (`GET /runs/:id/events`, `GET /events`).
+   * When absent, those routes 404 — the API is exactly the pre-M0 surface.
+   */
+  events?: import("../events/index.js").EventBus;
 }
 
 export interface ApiServer {
@@ -86,6 +91,7 @@ export function createApiServer(options: ApiServerOptions, deps: ApiDeps): ApiSe
     runtime: deps.runtime,
     maxConcurrentRuns: options.maxConcurrentRuns,
     ...(deps.logger !== undefined ? { logger: deps.logger } : {}),
+    ...(deps.events !== undefined ? { events: deps.events } : {}),
     ...(deps.redactor !== undefined
       ? { scrub: (text: string) => deps.redactor!.redactString(text) }
       : {}),
@@ -143,8 +149,24 @@ export function createApiServer(options: ApiServerOptions, deps: ApiDeps): ApiSe
     }
 
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
+    const runEventsMatch = /^\/runs\/([^/]+)\/events$/.exec(path);
     const taskMatch = /^\/tasks\/([^/]+)$/.exec(path);
     const knowledgeMatch = /^\/knowledge\/([^/]+)\/([^/]+)$/.exec(path);
+
+    // Live event stream (M0, CAP-004). Server-Sent Events, not WebSockets: the
+    // traffic is one-way and SSE survives proxies, reconnects automatically,
+    // and needs no extra dependency. `GET /events` streams everything;
+    // `GET /runs/:id/events` filters to one run.
+    if (path === "/events" || runEventsMatch) {
+      if (req.method !== "GET") return sendJson(res, 405, { error: "method_not_allowed" });
+      if (deps.events === undefined) return sendJson(res, 404, { error: "not_found" });
+      const runId = runEventsMatch ? decodeURIComponent(runEventsMatch[1]!) : undefined;
+      if (runId !== undefined && registry.get(runId) === undefined) {
+        return sendJson(res, 404, { error: "run_not_found" });
+      }
+      const after = Number(url.searchParams.get("after") ?? "0");
+      return streamEvents(res, deps.events, Number.isFinite(after) ? after : 0, runId, req);
+    }
 
     if (path === "/knowledge/search" || path === "/knowledge") {
       if (req.method !== "GET") return sendJson(res, 405, { error: "method_not_allowed" });
@@ -437,6 +459,72 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
     "X-Content-Type-Options": "nosniff",
   });
   res.end(payload);
+}
+
+/**
+ * Stream events as Server-Sent Events until the client disconnects (M0,
+ * CAP-004).
+ *
+ * Backpressure is the client's problem, by design: an SSE connection that
+ * cannot keep up is dropped (`res.write` returns false and we stop the
+ * subscription) rather than buffered without bound in the server. A stalled
+ * browser tab must never grow the agent's memory.
+ *
+ * A heartbeat comment every 15s keeps intermediaries from closing an idle
+ * stream — a run can be quiet for a minute while a model thinks.
+ */
+function streamEvents(
+  res: ServerResponse,
+  bus: import("../events/index.js").EventBus,
+  after: number,
+  runId: string | undefined,
+  req: IncomingMessage,
+): void {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+    "X-Content-Type-Options": "nosniff",
+  });
+  // Tell the client how long to wait before reconnecting, and echo a comment so
+  // proxies flush the headers immediately.
+  res.write("retry: 3000\n\n");
+
+  let open = true;
+  const write = (event: unknown): void => {
+    if (!open) return;
+    const ok = res.write(`data: ${JSON.stringify(event)}\n\n`);
+    if (!ok) {
+      // Subscriber is not draining; close rather than buffer. The client will
+      // reconnect with `?after=<lastSequence>` and catch up from the replay ring.
+      cleanup();
+      res.end();
+    }
+  };
+
+  const unsubscribe = bus.subscribe((event) => {
+    if (runId !== undefined && event.runId !== runId) return;
+    write(event);
+  }, after);
+
+  const heartbeat = setInterval(() => {
+    if (open) res.write(": ping\n\n");
+  }, 15_000);
+
+  const cleanup = (): void => {
+    if (!open) return;
+    open = false;
+    clearInterval(heartbeat);
+    unsubscribe();
+  };
+
+  req.on("close", () => {
+    cleanup();
+  });
+  res.on("close", () => {
+    cleanup();
+  });
 }
 
 class BodyTooLargeError extends Error {

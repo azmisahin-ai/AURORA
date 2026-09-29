@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  eventClass,
   formatAge,
   formatDuration,
   formatStep,
   formatTime,
   statusClass,
+  summarizeEvent,
   summarizeTrajectory,
   truncate,
   TASK_STATUSES,
@@ -73,5 +75,32 @@ describe("format", () => {
     expect(formatStep(undefined)).toBe("step");
     expect(formatStep(null)).toBe("step");
     expect(formatStep({ kind: "final" })).not.toContain("[object");
+  });
+
+  it("maps event types to CSS-safe families through an allowlist", () => {
+    expect(eventClass("tool.completed")).toBe("ev-tool");
+    expect(eventClass("model.requested")).toBe("ev-model");
+    expect(eventClass("agent.failed")).toBe("ev-agent");
+    expect(eventClass("verification.passed")).toBe("ev-verify");
+    expect(eventClass("file.modified")).toBe("ev-file");
+    // A hostile value never reaches a class attribute as-is.
+    expect(eventClass('<img src=x onerror=alert(1)>')).toBe("ev-other");
+    expect(eventClass(undefined)).toBe("ev-other");
+  });
+
+  it("summarises event payloads defensively", () => {
+    expect(
+      summarizeEvent({ type: "model.requested", payload: { model: "llama3.2", tools: ["a", "b"] } }),
+    ).toBe("llama3.2 · 2 tool(s)");
+    expect(
+      summarizeEvent({ type: "model.response", payload: { toolCalls: ["web_fetch"] } }),
+    ).toBe("tool calls: web_fetch");
+    expect(summarizeEvent({ type: "tool.completed", payload: { tool: "read_file" } })).toBe(
+      "read_file",
+    );
+    // Malformed payloads must not throw in the render loop.
+    expect(summarizeEvent({ type: "tool.completed", payload: null })).toBe("");
+    expect(summarizeEvent({ type: "model.failed", payload: { error: "boom" } })).toBe("boom");
+    expect(summarizeEvent(null)).toBe("");
   });
 });

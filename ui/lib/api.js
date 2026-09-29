@@ -73,7 +73,92 @@ export const api = {
   getKnowledge: (kind, slug) =>
     request(`/knowledge/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`),
   searchKnowledge: (params) => request(`/knowledge/search${query(params)}`),
+  streamRunEvents: (runId, handlers = {}) => streamEvents(runId, handlers),
 };
+
+/**
+ * Subscribe to a run's live event stream (M0, CAP-004).
+ *
+ * `EventSource` cannot send an `Authorization` header, and a token in a query
+ * string is logged by every proxy on the path (ADR 012 §2), so this uses
+ * `fetch` with a streaming body and parses the SSE frames itself. Returning a
+ * disposer (not a promise) lets the caller unsubscribe on a view change.
+ *
+ * Reconnection is deliberate: after a transport error the client waits, then
+ * reconnects with `?after=<lastSequence>` and the server replays the gap from
+ * its bounded ring. A gap the ring can no longer cover triggers `onGap` so the
+ * UI can say "history truncated" rather than silently skipping events.
+ */
+function streamEvents(runId, { onEvent, onError, onGap } = {}) {
+  const controller = new AbortController();
+  let lastSequence = 0;
+  let closed = false;
+  let timer = null;
+
+  const connect = async () => {
+    if (closed) return;
+    const path = `/runs/${encodeURIComponent(runId)}/events`;
+    const headers = {};
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    try {
+      const res = await fetch(`${path}${query({ after: lastSequence })}`, {
+        headers,
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) throw new ApiError(res.status, null);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const payload = parseFrame(frame);
+          if (payload !== null) {
+            // A sequence that skips ahead means the server's replay ring had
+            // already dropped the events in between.
+            if (lastSequence !== 0 && payload.sequence > lastSequence + 1) onGap?.(payload.sequence);
+            lastSequence = payload.sequence;
+            onEvent?.(payload);
+          }
+        }
+      }
+    } catch (cause) {
+      if (closed || controller.signal.aborted) return;
+      onError?.(cause);
+    }
+    // Reconnect after a short, fixed delay; the server holds the replay ring.
+    if (!closed) timer = setTimeout(() => void connect(), 3000);
+  };
+
+  void connect();
+
+  return () => {
+    closed = true;
+    if (timer !== null) clearTimeout(timer);
+    controller.abort();
+  };
+}
+
+/** Extract the event JSON from one SSE frame, or null for a comment/heartbeat. */
+function parseFrame(frame) {
+  const dataLines = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("data: ")) dataLines.push(line.slice("data: ".length));
+    else if (line.startsWith("data:")) dataLines.push(line.slice("data:".length));
+  }
+  if (dataLines.length === 0) return null;
+  try {
+    return JSON.parse(dataLines.join("\n"));
+  } catch {
+    return null;
+  }
+}
 
 function query(params) {
   const search = new URLSearchParams();

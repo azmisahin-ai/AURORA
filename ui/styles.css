@@ -326,3 +326,65 @@ footer {
 .hidden {
   display: none !important;
 }
+
+/* Live event timeline (M0, CAP-004) */
+ul.events {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+li.ev {
+  display: grid;
+  grid-template-columns: 48px 160px 1fr auto;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12px;
+  align-items: baseline;
+}
+
+li.ev:last-child {
+  border-bottom: none;
+}
+
+li.ev .ev-seq {
+  color: var(--muted);
+}
+
+li.ev .ev-type {
+  font-weight: 600;
+}
+
+li.ev .ev-summary {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+li.ev .ev-time {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+li.ev-agent .ev-type { color: #7dd3fc; }
+li.ev-model .ev-type { color: #c4b5fd; }
+li.ev-tool .ev-type { color: #86efac; }
+li.ev-approval .ev-type { color: #fdba74; }
+li.ev-verify .ev-type { color: #fca5a5; }
+li.ev-repair .ev-type { color: #fcd34d; }
+li.ev-run .ev-type { color: #94a3b8; }
+li.ev-file .ev-type { color: #5eead4; }
+
+li.ev-gap {
+  padding: 4px 10px;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 12px;
+}
+

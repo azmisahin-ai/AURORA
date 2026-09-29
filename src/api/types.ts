@@ -11,7 +11,10 @@ import type { RunResult } from "../core/agent/types.js";
  */
 export interface RuntimePort {
   /** Run one task to completion. `signal` aborts the run. */
-  runTask(task: string, opts?: { signal?: AbortSignal }): Promise<RunResult>;
+  runTask(
+    task: string,
+    opts?: { signal?: AbortSignal; runId?: string; taskId?: string },
+  ): Promise<RunResult>;
   /** Provider reachability, for `/health`. Never a credential check. */
   health(): Promise<boolean>;
 }

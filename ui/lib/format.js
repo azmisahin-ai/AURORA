@@ -104,3 +104,58 @@ export function summarizeTrajectory(trajectory) {
   }
   return { steps: entries.length, toolCalls, verifications };
 }
+
+/**
+ * A CSS-class-safe token for an event type's family, mirroring `statusClass`:
+ * the type is data from the stream, so it is mapped through an allowlist before
+ * it can reach a class attribute.
+ */
+export function eventClass(type) {
+  const value = typeof type === "string" ? type : "";
+  if (value.startsWith("agent.")) return "ev-agent";
+  if (value.startsWith("model.")) return "ev-model";
+  if (value.startsWith("tool.")) return "ev-tool";
+  if (value.startsWith("approval.")) return "ev-approval";
+  if (value.startsWith("verification.")) return "ev-verify";
+  if (value.startsWith("repair.")) return "ev-repair";
+  if (value.startsWith("run.")) return "ev-run";
+  if (value.startsWith("task.")) return "ev-task";
+  if (value === "file.modified") return "ev-file";
+  return "ev-other";
+}
+
+/**
+ * One-line summary of an event payload, for a dense timeline. Kept pure and
+ * defensive: payloads are `unknown` by contract, so a missing or exotic field
+ * degrades to an empty string rather than throwing in the render loop.
+ */
+export function summarizeEvent(event) {
+  const payload = event && typeof event.payload === "object" && event.payload !== null ? event.payload : {};
+  const type = typeof event?.type === "string" ? event.type : "";
+  if (type.startsWith("model.requested")) {
+    const model = typeof payload.model === "string" ? payload.model : "?";
+    const tools = Array.isArray(payload.tools) ? payload.tools.length : 0;
+    return `${model}${tools ? ` · ${tools} tool(s)` : ""}`;
+  }
+  if (type.startsWith("model.response")) {
+    const calls = Array.isArray(payload.toolCalls) ? payload.toolCalls.join(", ") : "";
+    return calls ? `tool calls: ${calls}` : `${payload.contentChars ?? 0} chars`;
+  }
+  if (type.startsWith("model.failed") || type === "agent.failed") {
+    return typeof payload.error === "string" ? payload.error : "";
+  }
+  if (type.startsWith("tool.") || type.startsWith("approval.")) {
+    const tool = typeof payload.tool === "string" ? payload.tool : "";
+    const summary = typeof payload.summary === "string" ? payload.summary : "";
+    return summary || tool;
+  }
+  if (type.startsWith("verification.")) {
+    const verifier = typeof payload.verifier === "string" ? payload.verifier : "";
+    return verifier;
+  }
+  if (type === "file.modified") {
+    return typeof payload.tool === "string" ? payload.tool : "";
+  }
+  if (typeof payload.task === "string") return truncate(payload.task, 60);
+  return "";
+}

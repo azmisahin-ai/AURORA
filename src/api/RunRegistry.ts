@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { RunResult } from "../core/agent/types.js";
 import type { ApiRunRecord, ApiRunStatus, RuntimePort } from "./types.js";
+import { NULL_EVENT_BUS, type EventEmitterPort } from "../events/index.js";
 
 export interface RunRegistryOptions {
   runtime: RuntimePort;
@@ -15,6 +16,8 @@ export interface RunRegistryOptions {
   logger?: import("pino").Logger;
   /** Scrubs an infrastructure error string before it is exposed over HTTP. */
   scrub?: (text: string) => string;
+  /** Event sink for run lifecycle events (M0, CAP-004). */
+  events?: EventEmitterPort;
 }
 
 export class RunCapacityError extends Error {
@@ -39,6 +42,7 @@ export class RunRegistry {
   private readonly maxRetained: number;
   private readonly logger?: import("pino").Logger;
   private readonly scrub: (text: string) => string;
+  private readonly events: EventEmitterPort;
   private readonly runs = new Map<string, ApiRunRecord>();
   private readonly controllers = new Map<string, AbortController>();
 
@@ -47,6 +51,7 @@ export class RunRegistry {
     this.maxConcurrentRuns = opts.maxConcurrentRuns;
     this.maxRetained = opts.maxRetained ?? 200;
     this.scrub = opts.scrub ?? ((text) => text);
+    this.events = opts.events ?? NULL_EVENT_BUS;
     if (opts.logger !== undefined) this.logger = opts.logger;
   }
 
@@ -76,6 +81,19 @@ export class RunRegistry {
     this.runs.set(id, record);
     const controller = new AbortController();
     this.controllers.set(id, controller);
+
+    this.events.emit({
+      type: "run.created",
+      source: "run-registry",
+      runId: id,
+      payload: { task },
+    });
+    this.events.emit({
+      type: "run.started",
+      source: "run-registry",
+      runId: id,
+      payload: { task },
+    });
 
     void this.execute(id, task, controller.signal);
     return record;
@@ -116,7 +134,7 @@ export class RunRegistry {
 
   private async execute(id: string, task: string, signal: AbortSignal): Promise<void> {
     try {
-      const result = await this.runtime.runTask(task, { signal });
+      const result = await this.runtime.runTask(task, { signal, runId: id });
       // A run that ends in `error` carries the provider's own message. That text
       // is surfaced over HTTP, so it gets the same scrub as a thrown one — log
       // redaction does not reach a response body.
@@ -146,6 +164,21 @@ export class RunRegistry {
     if (extra.result !== undefined) record.result = extra.result;
     if (extra.error !== undefined) record.error = extra.error;
     this.controllers.delete(id);
+    this.events.emit({
+      type:
+        status === "completed"
+          ? "run.completed"
+          : status === "cancelled"
+            ? "run.cancelled"
+            : "run.failed",
+      source: "run-registry",
+      runId: id,
+      payload: {
+        status,
+        ...(extra.error !== undefined ? { error: extra.error } : {}),
+        ...(extra.result?.status !== undefined ? { resultStatus: extra.result.status } : {}),
+      },
+    });
     this.prune();
   }
 

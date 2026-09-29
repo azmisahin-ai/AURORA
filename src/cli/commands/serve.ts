@@ -7,6 +7,7 @@ import { AgentRuntime } from "../../core/agent/AgentRuntime.js";
 import { FileTaskStore } from "../../core/task/FileTaskStore.js";
 import { FileKnowledgeStore } from "../../core/knowledge/FileKnowledgeStore.js";
 import { apiConfirmationGate, createApiServer } from "../../api/index.js";
+import { EventBus } from "../../events/index.js";
 
 export interface ServeCommandOptions {
   host?: string;
@@ -73,11 +74,13 @@ export function registerServeCommand(program: Command): void {
       const config = loadConfig(env);
       const logger = createLogger(config.logLevel);
       const redactor = config.redactLogs ? new SecretRedactor() : undefined;
+      const events = new EventBus();
 
       const runtime = new AgentRuntime({
         config,
         logger,
         confirmationGate: apiConfirmationGate(config.apiAllowMutation),
+        events,
       });
 
       // Serve the UI only when the directory is actually present: a configured
@@ -102,6 +105,7 @@ export function registerServeCommand(program: Command): void {
           knowledge: new FileKnowledgeStore(config.knowledgeDir),
           ...(uiDir !== undefined ? { uiDir } : {}),
           logger,
+          events,
           ...(redactor !== undefined ? { redactor } : {}),
         },
       );

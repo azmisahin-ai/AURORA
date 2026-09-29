@@ -12,6 +12,7 @@ import {
   type TrajectoryEntry,
   type VerificationOutcome,
 } from "./types.js";
+import { NULL_EVENT_BUS } from "../../events/index.js";
 
 /**
  * The ReAct loop: observe → reason → plan → execute → (verify) → repeat.
@@ -35,6 +36,8 @@ export class AgentLoop {
   async run(task: string, opts: RunOptions = {}): Promise<RunResult> {
     const { llm, planner, tools, limits } = this.deps;
     const logger = this.deps.logger;
+    const runId = opts.runId ?? this.deps.runId ?? "";
+    const taskId = opts.taskId ?? this.deps.taskId ?? "";
 
     const messages: ChatMessage[] = [
       { role: "system", content: this.deps.systemPrompt ?? DEFAULT_SYSTEM_PROMPT },
@@ -70,11 +73,22 @@ export class AgentLoop {
     let verificationCount = 0;
     let lastVerification: VerificationOutcome | undefined;
     let hasMutated = false;
+    let deniedCall = false;
+    let deniedObservation = "";
     let compactions = 0;
     let lastPlan: import("../context/types.js").ContextPlan | undefined;
 
     const maxVerifications = limits.maxVerifications ?? 0;
     const verificationEnabled = maxVerifications > 0 && this.deps.verifier !== undefined;
+
+    // Resolve the event sink once. `runId`/`taskId` default to identifiers the
+    // caller supplied; a CLI run with neither still emits, so the trajectory is
+    // observable even without a correlation id.
+    const bus = this.deps.events ?? NULL_EVENT_BUS;
+    const emit = (type: string, payload: unknown): void => {
+      bus.emit({ type, payload, source: "agent-loop", runId, taskId });
+    };
+    emit("agent.started", { task, maxIterations: limits.maxIterations, maxToolCalls: limits.maxToolCalls });
 
     // The full transcript lives in `messages`; each provider call gets a
     // budget-bounded view (ADR 009). No builder → the view is the transcript,
@@ -115,10 +129,27 @@ export class AgentLoop {
       },
     });
 
+    /** `finish` plus the terminal agent event, so callers cannot forget it. */
+    const finishAndEmit = (status: RunStatus, error?: string): RunResult => {
+      const result = finish(status, error);
+      // Only a genuine completion is `completed`. A budget exhaustion, timeout
+      // or external abort did not achieve the task, and reporting it as
+      // `agent.completed` would be the same NOT_VERIFIED-as-COMPLETED mistake in
+      // a different place.
+      emit(status === "completed" ? "agent.completed" : "agent.failed", {
+        status,
+        iterations: result.iterations,
+        toolCalls: result.toolCalls,
+        ...(error !== undefined ? { error } : {}),
+        ...(result.verifications !== undefined ? { verifications: result.verifications } : {}),
+      });
+      return result;
+    };
+
     try {
       while (iterations < limits.maxIterations) {
         if (controller.signal.aborted) {
-          return finish(timedOut ? "timeout" : "aborted");
+          return finishAndEmit(timedOut ? "timeout" : "aborted");
         }
         iterations++;
 
@@ -126,18 +157,29 @@ export class AgentLoop {
         let turn;
         try {
           const offeredTools = tools?.definitions?.() ?? [];
+          emit("model.requested", {
+            model: this.deps.modelName ?? "unknown",
+            tools: offeredTools.map((t) => t.name),
+            messageCount: messages.length,
+          });
           turn = await llm.chat({
             messages: view(),
             ...(offeredTools.length > 0 ? { tools: offeredTools } : {}),
             signal: controller.signal,
           });
+          emit("model.response", {
+            toolCalls: turn.toolCalls.map((tc) => tc.name),
+            contentChars: turn.content?.length ?? 0,
+            ...(turn.usage !== undefined ? { usage: turn.usage } : {}),
+          });
         } catch (cause) {
           if (cause instanceof LLMError && controller.signal.aborted) {
-            return finish(timedOut ? "timeout" : "aborted");
+            return finishAndEmit(timedOut ? "timeout" : "aborted");
           }
           const message = cause instanceof Error ? cause.message : String(cause);
           logger?.error({ err: message }, "llm call failed");
-          return finish("error", message);
+          emit("model.failed", { error: message });
+          return finishAndEmit("error", message);
         }
 
         if (turn.content) output = turn.content;
@@ -192,7 +234,18 @@ export class AgentLoop {
                 ? { verification: gate.verification }
                 : {}),
             });
-            return finish("completed");
+            // A run whose required mutation was refused is not a completed run.
+            // The model said it was done, but the change it depended on never
+            // happened (ADR 010). Report the denial honestly instead of the
+            // NOT_VERIFIED-as-COMPLETED mistake the gate exists to prevent.
+            if (deniedCall) {
+              return finishAndEmit(
+                "denied",
+                deniedObservation ||
+                  "A required workspace change was refused by the confirmation gate.",
+              );
+            }
+            return finishAndEmit("completed");
           }
           if (gate.kind === "stop") {
             trajectory.push({
@@ -200,7 +253,7 @@ export class AgentLoop {
               step,
               assistantContent: turn.content,
             });
-            return finish("max_verifications", gate.error);
+            return finishAndEmit("max_verifications", gate.error);
           }
           // gate.kind === "repair": a failing verification was appended to
           // `messages`; loop again so the model can fix the cause.
@@ -217,7 +270,7 @@ export class AgentLoop {
             step,
             assistantContent: turn.content,
           });
-          return finish("max_tool_calls");
+          return finishAndEmit("max_tool_calls");
         }
 
         const call = turn.toolCalls.find((tc) => tc.name === step.toolName);
@@ -235,8 +288,21 @@ export class AgentLoop {
         }
 
         toolCallCount++;
-        const result = await this.executeTool(call, tools, controller.signal);
-        if (result.mutatedWorkspace === true) hasMutated = true;
+        const result = await this.executeTool(call, tools, controller.signal, runId, taskId);
+        if (result.mutatedWorkspace === true) {
+          hasMutated = true;
+          // A later approved mutation supersedes an earlier denial: the run did
+          // change the workspace, so it is no longer a denied run.
+          deniedCall = false;
+          emit("file.modified", { tool: call.name });
+        }
+        if (result.denied === true) {
+          // A state-changing call was refused by the confirmation gate. Record
+          // the latest denial text; whether it makes the run "denied" is decided
+          // at completion, because a later approved mutation can recover it.
+          deniedCall = true;
+          deniedObservation = result.observation;
+        }
         messages.push({
           role: "tool",
           content: result.observation,
@@ -251,11 +317,11 @@ export class AgentLoop {
         });
 
         if (result.fatal) {
-          return finish("error", result.observation);
+          return finishAndEmit("error", result.observation);
         }
       }
 
-      return finish("max_iterations");
+      return finishAndEmit("max_iterations");
     } finally {
       clearTimeout(timeoutTimer);
       if (opts.signal) opts.signal.removeEventListener("abort", onExternalAbort);
@@ -296,6 +362,13 @@ export class AgentLoop {
     if (!enabled || verifier === undefined) return { kind: "accept" };
     if (!hasMutated) {
       this.deps.logger?.debug("completion accepted: nothing changed, verification skipped");
+      this.deps.events?.emit({
+        type: "verification.skipped",
+        source: "agent-loop",
+        runId: this.deps.runId ?? "",
+        taskId: this.deps.taskId ?? "",
+        payload: { reason: "nothing_changed" },
+      });
       return { kind: "accept" };
     }
 
@@ -306,16 +379,62 @@ export class AgentLoop {
         `Verification budget exhausted after ${verificationCount} attempt(s); ` +
         `the external check "${verifier.name}" still fails. Escalating.`;
       this.deps.logger?.warn({ verifier: verifier.name }, "verification budget exhausted");
+      this.deps.events?.emit({
+        type: "verification.failed",
+        source: "agent-loop",
+        runId: this.deps.runId ?? "",
+        taskId: this.deps.taskId ?? "",
+        payload: { verifier: verifier.name, reason: "budget_exhausted", attempts: verificationCount },
+      });
       return { kind: "stop", error };
     }
+
+    this.deps.events?.emit({
+      type: "verification.started",
+      source: "agent-loop",
+      runId: this.deps.runId ?? "",
+      taskId: this.deps.taskId ?? "",
+      payload: { verifier: verifier.name, attempt: verificationCount + 1 },
+    });
 
     const outcome = await verifier.verify(controller.signal);
     if (outcome.kind !== "fail") {
       // "pass" accepts; "skipped" (e.g. the tool is not permitted) must NOT be
       // reported as a pass — it accepts, but the skip is recorded in the
       // trajectory so the report can say verification did not actually run.
+      this.deps.events?.emit({
+        type: outcome.kind === "pass" ? "verification.passed" : "verification.skipped",
+        source: "agent-loop",
+        runId: this.deps.runId ?? "",
+        taskId: this.deps.taskId ?? "",
+        payload: { verifier: verifier.name, observation: outcome.observation },
+      });
+      if (outcome.kind === "pass" && verificationCount > 0) {
+        // A pass after at least one recorded failure means a repair round-trip
+        // actually closed. Emitting it separately lets the timeline show
+        // "repair.completed" rather than only the two verification events.
+        this.deps.events?.emit({
+          type: "repair.completed",
+          source: "agent-loop",
+          runId: this.deps.runId ?? "",
+          taskId: this.deps.taskId ?? "",
+          payload: { verifier: verifier.name, attempts: verificationCount + 1 },
+        });
+      }
       return { kind: "accept", verification: outcome };
     }
+
+    this.deps.events?.emit({
+      type: "verification.failed",
+      source: "agent-loop",
+      runId: this.deps.runId ?? "",
+      taskId: this.deps.taskId ?? "",
+      payload: {
+        verifier: verifier.name,
+        attempt: verificationCount + 1,
+        observation: outcome.observation.slice(0, 500),
+      },
+    });
 
     const verdict = this.classifier.classify({
       kind: "execution",
@@ -344,6 +463,8 @@ export class AgentLoop {
     call: import("../../providers/llm/LLMProvider.js").ToolCall,
     tools: AgentLoopDeps["tools"],
     signal: AbortSignal,
+    runId: string,
+    taskId: string,
   ) {
     if (!tools) {
       return {
@@ -358,7 +479,13 @@ export class AgentLoop {
       };
     }
     try {
-      return await tools.execute(call, signal);
+      // Pass the event scope so a per-run bus reaches the registry even when the
+      // registry itself was constructed once and shared.
+      return await tools.execute(call, signal, {
+        ...(this.deps.events !== undefined ? { events: this.deps.events } : {}),
+        runId,
+        taskId,
+      });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       return { ok: false, observation: `Tool "${call.name}" threw: ${message}` };

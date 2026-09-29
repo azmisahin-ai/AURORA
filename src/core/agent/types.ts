@@ -19,6 +19,20 @@ export interface ToolExecutionResult {
    * one lets a delegation that wrote code still trigger the parent's verifier.
    */
   mutatedWorkspace?: boolean;
+  /**
+   * True when this call was refused before it ran — currently only by the
+   * confirmation gate (ADR 010). The loop uses it to distinguish "the model
+   * chose not to change anything" from "the change it asked for was blocked",
+   * which must not be reported as a completed run.
+   */
+  denied?: boolean;
+}
+
+export interface ToolExecutionScope {
+  /** Event sink the registry emits `tool.*` and `approval.*` events into. */
+  events?: import("../../events/index.js").EventEmitterPort;
+  runId?: string;
+  taskId?: string;
 }
 
 /**
@@ -31,6 +45,7 @@ export interface ToolExecutor {
   execute(
     call: ToolCall,
     signal?: AbortSignal,
+    scope?: ToolExecutionScope,
   ): Promise<ToolExecutionResult>;
   /**
    * Tool definitions to offer the model, already filtered to what is permitted.
@@ -82,6 +97,7 @@ export type RunStatus =
   | "max_verifications"
   | "timeout"
   | "aborted"
+  | "denied"
   | "error";
 
 export interface TrajectoryEntry {
@@ -163,10 +179,20 @@ export interface AgentLoopDeps {
   logger?: import("pino").Logger;
   /** Classifies verification failures. Defaults to the built-in classifier. */
   classifier?: import("../errors/ErrorClassifier.js").ErrorClassifier;
+  /** Event sink for capability visibility (M0, CAP-004). No-op when absent. */
+  events?: import("../../events/index.js").EventEmitterPort;
+  /** Correlation ids used when `RunOptions` does not override them. */
+  runId?: string;
+  taskId?: string;
+  /** Model name, echoed in `model.requested` events. Purely informational. */
+  modelName?: string;
 }
 
 export interface RunOptions {
   signal?: AbortSignal;
+  /** Correlates this run's events; overrides `AgentLoopDeps.runId`. */
+  runId?: string;
+  taskId?: string;
 }
 
 export const DEFAULT_SYSTEM_PROMPT = [

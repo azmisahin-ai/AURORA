@@ -9,6 +9,7 @@ import {
   knowledgeList,
   knowledgeDetail,
   trajectory,
+  eventTimeline,
 } from "../../../ui/lib/panels.js";
 
 /**
@@ -164,5 +165,46 @@ describe("panels render untrusted content as text", () => {
     expect(container.textContent).toContain("done");
     expect(container.textContent).toContain("1 tool calls");
     expect(container.textContent).toContain("echo");
+  });
+
+  it("renders an event timeline and marks a dropped-event gap", () => {
+    const events = [
+      { type: "agent.started", sequence: 1, timestamp: new Date().toISOString(), payload: { task: "hi" } },
+      { type: "model.requested", sequence: 2, timestamp: new Date().toISOString(), payload: { model: "m" } },
+      // Sequence 3 is missing: the replay ring dropped it on reconnect.
+      { type: "tool.completed", sequence: 4, timestamp: new Date().toISOString(), payload: { tool: "echo" } },
+    ];
+    const container = document.createElement("div");
+    container.append(eventTimeline(events));
+    document.body.append(container);
+    expect(container.querySelectorAll("li.ev")).toHaveLength(3);
+    expect(container.querySelector(".ev-gap")?.textContent).toContain("dropped");
+    container.remove();
+  });
+
+  it("a hostile event type and payload stay inert", () => {
+    const events = [
+      {
+        type: `</span>${XSS}`,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        payload: { tool: XSS, summary: XSS },
+      },
+    ];
+    const container = document.createElement("div");
+    container.append(eventTimeline(events));
+    document.body.append(container);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("script")).toBeNull();
+    expect((globalThis as Record<string, unknown>).__pwned).toBeUndefined();
+    container.remove();
+  });
+
+  it("renders an empty timeline state", () => {
+    // Unlike the list builders, `eventTimeline` returns a single element.
+    const empty = eventTimeline([]);
+    expect(empty.textContent).toContain("Waiting");
+    const undef = eventTimeline(undefined);
+    expect(undef.textContent).toContain("Waiting");
   });
 });

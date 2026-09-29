@@ -59,9 +59,30 @@ export class StubTools implements ToolExecutor {
     return Object.prototype.hasOwnProperty.call(this.results, name);
   }
 
-  async execute(call: ToolCall): Promise<ToolExecutionResult> {
+  async execute(
+    call: ToolCall,
+    _signal?: AbortSignal,
+    scope?: { events?: import("../../src/events/index.js").EventEmitterPort; runId?: string; taskId?: string },
+  ): Promise<ToolExecutionResult> {
     this.executed.push(call);
-    return this.results[call.name] ?? { ok: false, observation: "no stub" };
+    // Mirror the real registry's contract: the loop hands the executor an event
+    // scope, and a tool call is observable as a request/completion pair.
+    scope?.events?.emit({
+      type: "tool.requested",
+      source: "stub-tools",
+      runId: scope.runId ?? "",
+      taskId: scope.taskId ?? "",
+      payload: { tool: call.name },
+    });
+    const result = this.results[call.name] ?? { ok: false, observation: "no stub" };
+    scope?.events?.emit({
+      type: result.ok ? "tool.completed" : "tool.failed",
+      source: "stub-tools",
+      runId: scope.runId ?? "",
+      taskId: scope.taskId ?? "",
+      payload: { tool: call.name, ok: result.ok },
+    });
+    return result;
   }
 }
 
