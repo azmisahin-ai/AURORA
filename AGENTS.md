@@ -491,6 +491,77 @@ in the runtime; reproduce against `qwen2.5:7b` first.
 
 **Enforced rule for tool arguments.** Small models frequently send `"true"` for a
 boolean or a number as a string. `ToolRegistry` validates against the zod schema
-and returns the issue text as the observation (correct), but it does not coerce.
-Coercion is a deliberate non-goal until there is a test for it; a schema that
-accepts the string form would silently change what a tool receives.
+and returns the issue text as the observation, but the model cannot always act
+on it. A JSON-Schema-driven coercion step (`src/tools/coerce.ts`) now repairs the
+*presentation* of an argument before validation: a string that is unambiguously a
+number/boolean for a `number`/`boolean` field is converted, so only the wire form
+is normalised. It never widens what a tool accepts — a `string` field still
+rejects a number, and an unparseable value still fails the schema and is fed back
+as an observation. Guarded by `tests/unit/tools/coerce.test.ts` (7) and the
+coercion cases in `tests/unit/tools/tool-registry.test.ts`.
+
+**2026-09-29 — full re-verification after two fixes.** Ollama v0.34.4
+(CPU-only), `qwen2.5:7b`: `npx vitest run` → **58 files, 576 tests, 0 failed,
+0 skipped**. This run adds, on top of the previous green log below:
+
+1. **Tool-argument coercion** (`src/tools/coerce.ts`, wired into
+   `ToolRegistry.execute`). The runtime failure was a weak model emitting `"5"`
+   for `ListFilesTool.maxResults` and `"true"` for
+   `KnowledgeWriteTool.overwrite`; zod rejected them and the run stalled. The
+   affected fields were 4 tools: `ListFilesTool`, `KnowledgeSearchTool`,
+   `KnowledgeWriteTool`, `WebSearchTool`. `web_fetch` itself was never the
+   problem — a direct probe returned HTTP 200 for `example.com`.
+2. **Keyless search** (`DuckDuckGoSearchProvider`). `aurora research` can now
+   find sources with no API key; the DuckDuckGo HTML endpoint is parsed and
+   redirect links are unwrapped (`unwrapDuckDuckGoUrl`). Live probe returned
+   `docs.ollama.com/api/streaming` for `"ollama api chat streaming"`. `noop`
+   remains the offline/degraded option and is now the *non*-default.
+
+**The provider posture.** `AURORA_SEARCH_PROVIDER` defaults to `duckduckgo`
+(keyless). `noop` disables search. Tests that assert *other* policy (argument
+caps, rate limiting, confirmation) pin `noop` so they stay offline and
+deterministic; the search wiring itself is covered by the DuckDuckGo tests.
+
+**Dev-dependency advisories resolved.** `npm audit` reported 5 advisories
+(3 moderate, 1 high, 1 critical), all in the dev-only test toolchain
+(`vitest@2` → `vite@5` → `esbuild`). Upgraded to `vitest@5.0.2` + `vite@8`,
+pinning `vite` because vitest 5 declares it a peer. A clean
+`rm -rf node_modules package-lock.json && npm install` now reports **0
+vulnerabilities** with no `--legacy-peer-deps`, and the full suite is green on
+the new versions.
+
+**2026-09-29 — full system verified green with a live provider.** Ollama v0.34.4
+(CPU-only), `qwen2.5:7b`: `npx vitest run` → **56 files, 557 tests, 0 failed,
+0 skipped**. All 15 integration files passed live, including `research-live`,
+`subagent-live`, `tool-use-live`, `memory-live`, `ollama-live`,
+`verification-live`, `web-live`. `aurora serve` + the operator UI were driven in
+a real browser (run created from the UI, status polled, detail panel rendered).
+
+Two production issues were found and fixed during this verification:
+
+1. **Windows CLI silently did nothing.** `process.argv[1]` is
+   `C:\AURORA\dist\cli\index.js` with backslashes, but the entry check used
+   `endsWith("cli/index.js")`, so the CLI entry was never detected. Fixed with
+   resolved-URL comparison (`realpathSync` + `pathToFileURL`); guarded by
+   `tests/unit/cli-entry.test.ts` and `isEntryPoint()`'s exported shape. The
+   mutation test (restoring the suffix check) fails that guard.
+2. **`research` reported success with nothing written.** The loop can report
+   `completed` on the model's word alone, so `research` now checks the trajectory
+   for a successful `knowledge_write` and exits non-zero with a specific message
+   when the topic was not persisted. Guarded by the `didPersistFinding` test in
+   `tests/unit/cli.test.ts`.
+3. **The UI rendered a trajectory step as `[object Object]`.** Found by driving
+   the operator UI in a real browser; `panels.js` interpolated `entry.step` (an
+   object) into a template. Fixed by `formatStep` in `ui/lib/format.js`
+   (`kind toolName · rationale`), guarded by the `[object Object]` regression in
+   `tests/unit/ui/format.test.ts`. The UI's own note said `app.js` had no
+   automated test — this is exactly the gap that leaves; the panels are tested,
+   the event wiring still is not (tagged DOĞRULANACAK in ADR 012).
+
+**Model capability is the dominant reliability variable** (measured, not
+asserted): `llama3.2:1b` emits malformed/nested tool calls, omits required
+arguments, and loops to a bound; `llama3.2:3b` passes single-tool tasks and is
+marginal for multi-step research; `qwen2.5:7b` passes everything. The schema
+rejection path works correctly — the model is fed the validation error as an
+observation — but a 1B model cannot act on it. Do not "fix" a weak-model failure
+in the runtime; reproduce against `qwen2.5:7b` first.

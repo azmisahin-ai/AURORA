@@ -78,6 +78,7 @@ Key variables:
 | `AURORA_TIMEOUT_MS` | `120000` | Wall-clock bound per run |
 | `AURORA_WORKSPACE` | `./workspace` | Sandbox root for file tools |
 | `AURORA_KNOWLEDGE_DIR` | `./knowledge` | Knowledge store root |
+| `AURORA_SEARCH_PROVIDER` | `duckduckgo` | Keyless search backend; `noop` disables web search (Phase 3) |
 | `AURORA_TEST_COMMAND` | — | External check for Phase 4 verification |
 | `AURORA_MAX_VERIFICATIONS` | `0` | Cap on verify→repair attempts; 0 disables |
 | `AURORA_MAX_SUB_AGENTS` | `3` | Cap on sub-agent delegations; 0 disables (Phase 5) |

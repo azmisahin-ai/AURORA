@@ -10,6 +10,7 @@ import type { ConfirmationGate } from "../security/ConfirmationGate.js";
 import { AllowAllGate } from "../security/ConfirmationGate.js";
 import type { KeyedRateLimiter } from "../security/RateLimiter.js";
 import { SecretRedactor } from "../security/SecretRedactor.js";
+import { coerceArguments } from "./coerce.js";
 import type { Tool, ToolContext } from "./types.js";
 
 export interface ToolRegistryOptions {
@@ -61,9 +62,20 @@ function requiresConfirmation(tool: Tool): boolean {
 export class ToolRegistry implements ToolExecutor {
   private readonly tools = new Map<string, Tool>();
   private readonly options: ToolRegistryOptions;
+  /** Generated JSON Schema per tool, computed once — it is immutable. */
+  private readonly schemaCache = new WeakMap<Tool, unknown>();
 
   constructor(options: ToolRegistryOptions) {
     this.options = options;
+  }
+
+  private jsonSchema(tool: Tool): unknown {
+    let schema = this.schemaCache.get(tool);
+    if (schema === undefined) {
+      schema = z.toJSONSchema(tool.inputSchema, { target: "draft-7" });
+      this.schemaCache.set(tool, schema);
+    }
+    return schema;
   }
 
   register(tool: Tool): this {
@@ -101,7 +113,7 @@ export class ToolRegistry implements ToolExecutor {
       .map((t) => ({
         name: t.name,
         description: t.description,
-        parameters: z.toJSONSchema(t.inputSchema, { target: "draft-7" }),
+        parameters: this.jsonSchema(t),
       }));
   }
 
@@ -135,7 +147,13 @@ export class ToolRegistry implements ToolExecutor {
       };
     }
 
-    const parsed = tool.inputSchema.safeParse(call.arguments);
+    // Normalise the model's argument types against the tool's own schema before
+    // validating. Models routinely send `"5"` for an integer and `"true"` for a
+    // boolean; rejecting those burns an iteration for no reason and tells the
+    // model nothing useful. Coercion is schema-driven, so a string field is
+    // never turned into a number (see `coerce.ts`).
+    const coerced = coerceArguments(call.arguments, this.jsonSchema(tool));
+    const parsed = tool.inputSchema.safeParse(coerced);
     if (!parsed.success) {
       const issues = parsed.error.issues
         .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)

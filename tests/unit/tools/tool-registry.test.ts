@@ -219,6 +219,31 @@ describe("ToolRegistry.execute — validation and errors", () => {
     expect(result.observation).toMatch(/Invalid arguments/);
   });
 
+  it("coerces a numeric string for a number field before validating", async () => {
+    const counted = defineTool({
+      name: "counted",
+      description: "Needs a number and a boolean",
+      inputSchema: z.object({ n: z.number().int(), flag: z.boolean() }),
+      requiredPermissions: [] as const,
+      async execute(input) {
+        return { ok: true, output: `${typeof input.n}:${input.n},${typeof input.flag}:${input.flag}` };
+      },
+    });
+    const r = registry([]).register(counted);
+    const result = await r.execute({
+      name: "counted",
+      arguments: { n: "5", flag: "true" },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.observation).toBe("number:5,boolean:true");
+  });
+
+  it("still rejects a numeric string for a string field", async () => {
+    const r = registry(["READ_ONLY"]).register(echoTool);
+    const result = await r.execute({ name: "echo_tool", arguments: { value: 42 } });
+    expect(result.ok).toBe(false);
+  });
+
   it("converts a thrown tool error into a non-fatal observation", async () => {
     const r = registry([]).register(throwingTool);
     const result = await r.execute({ name: "thrower", arguments: {} });
