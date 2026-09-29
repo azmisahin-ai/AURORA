@@ -180,9 +180,15 @@ tagged **DOĞRULANACAK** below, not assumed.
   payload, in `tests/unit/ui/panels.test.ts`). The `fetch`-based SSE client
   (`ui/lib/api.js`) is tested against a real `node:http` server in
   `tests/integration/ui-sse-client.test.ts` — reconnect with `?after`, gap
-  detection, and disposer teardown are all exercised over a real socket. What
-  remains browser-only is the `app.js` wiring itself: which panel mounts the
-  timeline and when the stream starts and stops.
+  detection, and disposer teardown are all exercised over a real socket. The
+  `app.js` wiring itself is now covered too: `tests/integration/ui-app-wiring.test.ts`
+  boots the module under jsdom against the real `index.html` and a real
+  `node:http` server, then clicks through to a run — asserting that the timeline
+  mounts, that the subscription is torn down when the operator leaves the Agents
+  view (proved by the server observing the client abort, not merely by the
+  timeline disappearing), and that a replay gap marks the timeline. Three
+  mutations (removing the teardown, dropping `onGap`, removing the timeline)
+  each turn the suite red.
 
 ## Sources (accessed 2026-09-28)
 

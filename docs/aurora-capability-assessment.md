@@ -335,8 +335,13 @@ Eşzamanlılık üst sınırı, gövde boyutu sınırı, istek hız sınırı me
 | Seviye | Dosya | Test | Kapsam |
 |---|---|---|---|
 | Unit | 43 | ~483 | Doğrulayıcılar, izinler, planner, config, coercion, redaksiyon |
-| Integration | 15 | ~93 | Ollama canlı, dosya sistemi, web fetch, API, UI, görev kurtarma |
-| **Toplam** | **58** | **576** | **0 hata, 0 skip (canlı Ollama ile)** |
+| Integration | 21 | ~126 | Ollama canlı, dosya sistemi, web fetch, API, UI (SSE istemcisi + `app.js` kablolaması), görev kurtarma |
+| **Toplam** | **64** | **609** | **604 geçti, 5 skip** (bu host'ta Ollama yok) |
+
+> Sayılar 2026-09-29'daki gerçek koşudan okunmuştur: `Test Files 59 passed | 5
+> skipped (64)`, `Tests 604 passed | 5 skipped (609)`. 5 skip, canlı Ollama
+> gerektiren testlerdir (bu host'ta Ollama kurulu değil); Ollama varken bunlar da
+> koşar. Skip, "PASS" olarak raporlanmaz.
 
 - Canlı testler gerçek Ollama gerektirir; yoksa açıkça `skip` edilir ve raporlanır.
 - `fileParallelism: false` — beş canlı test aynı Ollama örneğini kullandığından determinizm için serileştirilmiş.
@@ -393,7 +398,7 @@ kabul kriteri orada yazılıdır.
 | 9 | Tek kullanıcı token'ı | **M8** (ertelendi) |
 | 10 | Redaksiyon sınırı (gözlem metni) | **M6** |
 | 11 | Model kabiliyeti bağımlılığı | **M1** |
-| 12 | `DOĞRULANACAK` işaretleri; `ui/app.js` test edilmiyor | **M0** (kalan) + **M7** |
+| 12 | `DOĞRULANACAK` işaretleri; `ui/app.js` test edilmiyor | **M7** (kalan işaretler) |
 
 Ayrıntılı liste:
 
@@ -408,7 +413,7 @@ Ayrıntılı liste:
 9. **Tek kullanıcı token'ı** — Çok kiracılı ortam için uygun değil.
 10. **Redaksiyon sınırı** — Gözlem metni redakte edilmez; sırların modele ulaşması engellenmez.
 11. **Ollama bağımlılığı (test) ve model kabiliyeti** — Güvenilirlik büyük ölçüde model kalitesine bağlı (ölçülmüş: 1B model başarısız, 7B model geçer).
-12. **`DOĞRULANACAK` işaretleri** — `docs/adr` ve `docs/research` genelinde 25+ nokta; UI olay kablolaması (`ui/app.js`) otomatik test edilmiyor.
+12. **`DOĞRULANACAK` işaretleri** — `docs/adr` ve `docs/research` genelinde 25+ nokta. UI olay kablolaması (`ui/app.js`) **artık otomatik test ediliyor** (`tests/integration/ui-app-wiring.test.ts`; timeline mount, Agents görünümünden çıkışta abonelik teardown'ı ve replay gap işaretlemesi — üçü de mutasyonla doğrulandı). Kalan `DOĞRULANACAK` işaretleri M7 kapsamında kapatılacak.
 
 ---
 

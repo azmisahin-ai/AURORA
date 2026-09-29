@@ -347,7 +347,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferred
 
 | M | Name | Depends on | Status |
 |---|---|---|---|
-| **M0** | Capability visibility | — | 🚧 |
+| **M0** | Capability visibility | — | ✅ |
 | **M1** | Model-agnostic hardening & config truth | M0 | ⬜ |
 | **M2** | Retrieval — local-first RAG | M1 | ⬜ |
 | **M3** | Multi-architecture agents | M1 | ⬜ |
@@ -357,7 +357,7 @@ Legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferred
 | **M7** | Operator experience & evaluation | M2–M6 | ⬜ |
 | **M8** | Multi-tenant deployment | — | ⏭️ |
 
-### M0 — Capability visibility 🚧
+### M0 — Capability visibility ✅
 
 **Why.** An operator cannot trust a run it cannot see. Before adding
 capabilities, the runtime must expose what it is doing, live, and report failure
@@ -377,9 +377,11 @@ honestly.
       in order.
 - [x] The SSE client is covered by an integration test against a real
       `node:http` server (`tests/integration/ui-sse-client.test.ts`).
-
-**Remaining:** `app.js` wiring (which panel mounts the timeline, when the stream
-starts and stops) is still browser-smoke-only. Close it or accept it explicitly.
+- [x] The `app.js` wiring is covered too: `tests/integration/ui-app-wiring.test.ts`
+      boots it under jsdom against the real `index.html` and a real server, then
+      asserts the timeline mounts, the subscription is torn down on leaving the
+      Agents view (server-observed client abort), and a replay gap is marked.
+      Three mutations each turn the suite red.
 
 ### M1 — Model-agnostic hardening & config truth ⬜
 

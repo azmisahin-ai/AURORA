@@ -616,3 +616,21 @@ ile Ollama varligini kontrol et; yoksa sonucu SKIP olarak raporla, PASS deme.
 work host uzerinden acildi; bitmis bir runa baglanan istemci 7 olayi (#1
 run.created .. #7 run.failed) sira numaralari, dogru siniflar ve zaman
 damgalariyla render etti. Ollama yoklugu `failed` olarak durustce gosterildi.
+
+**2026-09-29 (devam 2) — M0 kapandi: `app.js` timeline kablolamasi test edildi.**
+M0/CAP-004un son maddesi (app.js wiring yalnizca tarayici duman testi) kapandi.
+`tests/integration/ui-app-wiring.test.ts` `app.js`i jsdom altinda, GERCEK
+`ui/index.html` bodyi ve GERCEK bir `node:http` sunucusuna karsi boot ediyor;
+sonra bir runa tiklayarak suclari dogruluyor: (1) timeline mount ediliyor,
+(2) Agents gorunumunden cikinca abonelik teardown ediliyor — kanit sunucunun
+istemci abortunu gozlemlemesi, sadece timelinein kaybolmasi degil, (3) replay
+gapi timelinei isaretliyor. Uc mutasyon (teardownu kaldir, onGapi dusur,
+timelinei kaldir) suitei kirmiziya dondurdu.
+
+Onemli ders: ilk surum FLAKYdi. `clientAborts` sayaci testler arasi siziyordu
+(bir onceki testin afterEach kapanisi sayilabiliyordu), bu yuzden teardown
+mutasyonunu tam kosuda yakalamadi. Baglantilar artik monoton kimlik tasiyor
+(`opened`/`aborted`), sizinti yok. Yeni test 3 kez ust uste kosuldu, hepsi yesil.
+
+Suite: **64 dosya, 609 test → 604 passed, 5 skipped**; TSC-OK. M0 artik ✅;
+su anki odak M1 (model-agnostic hardening & config truth).
