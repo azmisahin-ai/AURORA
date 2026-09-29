@@ -76,6 +76,21 @@ export function formatDuration(startIso, endIso) {
 }
 
 /**
+ * One readable label for a trajectory step. `step` is an object
+ * (`{ kind, rationale, ... }`), so interpolating it directly into a template
+ * renders "[object Object]"; this flattens it to `kind · rationale`, including
+ * the tool name when there is one. Pure, so it is unit-tested without a DOM.
+ */
+export function formatStep(step, fallback = "step") {
+  if (typeof step === "string" && step !== "") return step;
+  if (!step || typeof step !== "object") return fallback;
+  const kind = typeof step.kind === "string" && step.kind !== "" ? step.kind : fallback;
+  const tool = typeof step.toolName === "string" && step.toolName !== "" ? ` ${step.toolName}` : "";
+  const rationale = typeof step.rationale === "string" && step.rationale !== "" ? step.rationale : "";
+  return rationale ? `${kind}${tool} · ${rationale}` : `${kind}${tool}`;
+}
+
+/**
  * Count the trajectory's steps for a compact summary. Returns plain numbers, so
  * the caller decides how to render them.
  */

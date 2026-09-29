@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   formatAge,
   formatDuration,
+  formatStep,
   formatTime,
   statusClass,
   summarizeTrajectory,
@@ -58,5 +59,19 @@ describe("format", () => {
     expect(summary).toEqual({ steps: 3, toolCalls: 2, verifications: 1 });
     expect(summarizeTrajectory(undefined)).toEqual({ steps: 0, toolCalls: 0, verifications: 0 });
     expect(summarizeTrajectory("nope")).toEqual({ steps: 0, toolCalls: 0, verifications: 0 });
+  });
+
+  it("renders a trajectory step as text, never [object Object]", () => {
+    // The bug this guards: `step` is an object, and `${entry.step}` rendered it
+    // as "[object Object]" in the trajectory summary.
+    expect(formatStep({ kind: "final", rationale: "no tool call" })).toBe("final · no tool call");
+    expect(formatStep({ kind: "tool", toolName: "web_fetch", rationale: "fetch" })).toBe(
+      "tool web_fetch · fetch",
+    );
+    expect(formatStep({ kind: "reason" })).toBe("reason");
+    expect(formatStep("plain step")).toBe("plain step");
+    expect(formatStep(undefined)).toBe("step");
+    expect(formatStep(null)).toBe("step");
+    expect(formatStep({ kind: "final" })).not.toContain("[object");
   });
 });

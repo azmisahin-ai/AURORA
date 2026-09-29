@@ -7,6 +7,7 @@ import { el, externalLink } from "./dom.js";
 import {
   formatAge,
   formatDuration,
+  formatStep,
   formatTime,
   statusClass,
   summarizeTrajectory,
@@ -163,7 +164,7 @@ export function runDetail(run) {
 export function trajectory(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return empty("No trajectory recorded.");
   const items = entries.map((entry, index) => {
-    const title = `#${entry.iteration ?? index} · ${entry.step ?? "step"}`;
+    const title = `#${entry.iteration ?? index} · ${formatStep(entry.step)}`;
     const body = [];
     if (entry.assistantContent) {
       body.push(el("div", { class: "traj-assistant", text: truncate(entry.assistantContent, 600) }));
