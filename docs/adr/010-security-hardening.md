@@ -79,6 +79,15 @@ machine even when the tool does not declare a workspace mutation.
 With `confirmMode=prompt` and no TTY, `--confirm-strict` denies rather than
 silently approving; without it, the run proceeds under policy.
 
+The CLI maps each mode to exactly its gate — `allow → AllowAllGate`,
+`deny → DenyAllGate`, `prompt → PromptGate`. An earlier draft funnelled every
+non-`prompt` mode into `AllowAllGate`, which silently turned
+`AURORA_CONFIRM_MODE=deny` into "approve everything"; a test now pins the
+mapping and fails if that shortcut returns (`tests/unit/cli.test.ts` § "keeps
+allow as allow and deny as deny"). The prompt gate itself builds a fresh
+readline per question, because the gate is asked once per state-changing call
+and a closed interface cannot answer the second one.
+
 ### 3. Rate limits bound loops, not users
 
 A per-tool token bucket (`KeyedRateLimiter`) caps *network* tools. The threat is

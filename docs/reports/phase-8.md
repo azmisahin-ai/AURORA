@@ -91,6 +91,27 @@ bilerek genişletebilsin.
 - `tests/integration/security-hardening.test.ts` (yeni).
 - `tests/unit/{config,cli}.test.ts` — Phase 8 alanları ve bayrakları.
 
+### İnceleme sırasında bulunan iki gerçek hata
+
+Rapor yazılırken CLI'daki gate eşlemesi yeniden okunurken iki hata bulundu ve
+düzeltildi. İkisi de test edilmemiş bir kod yolundaydı — tam da kabul kriterinin
+"test edilmemiş başarı yoktur" kuralının hedeflediği durum.
+
+1. **`deny` modu sessizce `allow` oluyordu.** `buildConfirmationGate`, `prompt`
+   dışındaki her modu `AllowAllGate`'e düşürüyordu. Sonuç: `AURORA_CONFIRM_MODE=deny`
+   ayarlayan bir operatör (veya CI) aslında "her şeyi onayla" elde ediyordu —
+   güvenlik açısından sessiz, yüksek etkili bir hata. Eşleme artık modu birebir
+   kendi gate'ine götürüyor ve bunu sabitleyen bir test var; eski kısayol geri
+   gelirse test kırmızı.
+2. **`PromptGate` ikinci soruda kırılıyordu.** `readline` arayüzü ilk cevaptan
+   sonra kapatılıyordu ama gate her state-changing çağrıda yeniden soruyor; ikinci
+   çağrıda kapanmış bir arayüz kullanılıyordu. Artık her soru için yeni bir
+   `readline` kurulup cevaptan sonra kapatılıyor.
+
+İkisi de `tests/unit/cli.test.ts` § "CLI confirmation gate mapping" ile
+kapsandı; birinci hatanın koruyucu testi mutasyonla doğrulandı (kısayol geri
+konunca 1 test FAIL).
+
 ## Çalıştırılan Testler
 
 | Test | Sonuç | Not |
@@ -103,9 +124,9 @@ bilerek genişletebilsin.
 | `tests/unit/observability/logger-redaction.test.ts` (2) | PASS | Gerçek pino çıktısında mesaj ve nesne redaksiyonu |
 | `tests/integration/security-hardening.test.ts` (9) | PASS | **Gerçek** registry/validator/child process/HTTP/pino |
 | `tests/unit/config.test.ts` (17) | PASS | Phase 8 varsayılanları, env eşleme, `"false"` regresyonu |
-| `tests/unit/cli.test.ts` (9) | PASS | `--confirm/--no-confirm/--confirm-strict` |
-| **Tam suite (canlı hariç)** | **464 PASS, 0 FAIL, 0 SKIP** | 41 dosya |
-| **Tam suite (canlı dahil)** | **481 PASS, 0 FAIL, 0 SKIP** | 48 dosya; gerçek Ollama koştu |
+| `tests/unit/cli.test.ts` (11) | PASS | `--confirm/--no-confirm/--confirm-strict` + gate eşlemesi (deny ≠ allow) |
+| **Tam suite (canlı hariç)** | **466 PASS, 0 FAIL, 0 SKIP** | 41 dosya |
+| **Tam suite (canlı dahil)** | **483 PASS, 0 FAIL, 0 SKIP** | 48 dosya; gerçek Ollama koştu |
 
 ### Mutasyon testi
 
@@ -117,6 +138,7 @@ Testlerin gerçekten yakaladığını kanıtlamak için dört mutasyon denendi.
 | Kapı her zaman `approved` döndürdü | 1 test FAIL |
 | `redactor` kablolaması kaldırıldı | **önce PASS → kapsam boşluğu** |
 | Config limiter dalı `false` yapıldı | **önce PASS → kapsam boşluğu** |
+| CLI `deny` kısayolu geri kondu | 1 test FAIL |
 
 İlk iki mutasyon hemen yakalandı. Son iki mutasyon **yakalanmadı** ve bu, tam da
 mutasyon testinin varlık sebebini gösterdi: `ToolRegistry` testleri kendi
@@ -125,7 +147,8 @@ değişikliği tüm testlerden geçiyordu. Var olan ama bağlanmayan bir kontrol
 kontrol değildir. `tests/unit/tools/build-tool-registry.test.ts` bu kablolamayı
 doğrudan assert edecek şekilde eklendi; iki mutasyon da artık yakalanıyor ve her
 ikisi için birer koruyucu test bırakıldı (config'ten türeyen kapasitenin 4. çağrıyı
-reddetmesi; redaksiyonun varsayılan olarak log'a uygulanması).
+reddetmesi; redaksiyonun varsayılan olarak log'a uygulanması). Son satırdaki
+mutasyon, inceleme sırasında bulunan `deny→allow` hatasının koruyucu testidir.
 
 ### Ölçüm
 

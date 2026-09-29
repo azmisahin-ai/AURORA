@@ -228,7 +228,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
 - [x] Live integration: real child processes, a real HTTP server, the real
       registry, real validators and a real pino logger
       (`tests/integration/security-hardening.test.ts`; canlı suite dahil
-      481 test / 0 FAIL).
+      483 test / 0 FAIL).
 
 > No phase is advanced until the previous phase's acceptance criteria are met.
 

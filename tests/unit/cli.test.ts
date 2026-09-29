@@ -1,11 +1,34 @@
 import { describe, it, expect } from "vitest";
 import { buildProgram } from "../../src/cli/index.js";
+import { buildConfirmationGate } from "../../src/cli/commands/run.js";
 
 /**
  * CLI parsing only: these assert that arguments are wired to the right command
  * and that a stray command or missing argument is rejected. The commands
  * themselves are covered by the integration and live tests.
  */
+
+describe("CLI confirmation gate mapping", () => {
+  const request = { tool: "write_file", summary: "write x" };
+
+  it("keeps allow as allow and deny as deny", async () => {
+    // The bug this guards: mapping every non-prompt mode to AllowAllGate, which
+    // silently turned AURORA_CONFIRM_MODE=deny into "approve everything".
+    expect(await buildConfirmationGate("allow", false).request(request)).toBe("approved");
+    expect(await buildConfirmationGate("deny", false).request(request)).toBe("denied");
+  });
+
+  it("denies unanswerable prompt mode only when strict", async () => {
+    const originalIsTTY = process.stdin.isTTY;
+    try {
+      (process.stdin as { isTTY?: boolean }).isTTY = false;
+      expect(await buildConfirmationGate("prompt", true).request(request)).toBe("denied");
+      expect(await buildConfirmationGate("prompt", false).request(request)).toBe("approved");
+    } finally {
+      (process.stdin as { isTTY?: boolean }).isTTY = originalIsTTY;
+    }
+  });
+});
 
 describe("CLI wiring", () => {
   it("registers run, research, knowledge, tasks and sessions", () => {

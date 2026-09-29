@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { createInterface } from "node:readline/promises";
 import { loadConfig } from "../../config/Config.js";
+import type { Config } from "../../config/Config.js";
 import { createLogger } from "../../observability/Logger.js";
 import { AgentRuntime } from "../../core/agent/AgentRuntime.js";
 import {
@@ -124,11 +125,16 @@ export function registerRunCommand(program: Command): void {
 
 /**
  * The CLI is the only layer that owns stdin, so it is the only place a
- * `PromptGate` may be built (Phase 8). `--confirm` sets `confirmMode=prompt`;
- * with no TTY, `--confirm-strict` denies rather than silently approving.
+ * `PromptGate` may be built (Phase 8). `allow` and `deny` stay what they say;
+ * `--confirm` sets `confirmMode=prompt`, and with no TTY `--confirm-strict`
+ * denies rather than silently approving.
  */
-function buildConfirmationGate(mode: string, strict: boolean): ConfirmationGate {
-  if (mode !== "prompt") return new AllowAllGate();
+export function buildConfirmationGate(
+  mode: Config["confirmMode"],
+  strict: boolean,
+): ConfirmationGate {
+  if (mode === "allow") return new AllowAllGate();
+  if (mode === "deny") return new DenyAllGate();
 
   const interactive = process.stdin.isTTY === true;
   if (!interactive) {
@@ -136,9 +142,12 @@ function buildConfirmationGate(mode: string, strict: boolean): ConfirmationGate 
     return strict ? new DenyAllGate() : new AllowAllGate();
   }
 
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  // A fresh readline per question, closed as soon as it is answered: the gate
+  // is asked once per state-changing call, and a closed interface cannot be
+  // reused, so a single long-lived one would break the second confirmation.
   return new PromptGate({
     ask: async (question) => {
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
       try {
         return await rl.question(question);
       } catch {
