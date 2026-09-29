@@ -33,7 +33,14 @@ afterEach(async () => {
 
 function build(env: Record<string, string> = {}) {
   return buildToolRegistry({
-    config: loadConfig({ AURORA_KNOWLEDGE_DIR: knowledgeDir, ...env }),
+    // Default to the keyless-less `noop` provider so these policy tests stay
+    // offline; the DuckDuckGo default would otherwise make `web_search` hit the
+    // network. The search wiring itself is covered in the search tests.
+    config: loadConfig({
+      AURORA_KNOWLEDGE_DIR: knowledgeDir,
+      AURORA_SEARCH_PROVIDER: "noop",
+      ...env,
+    }),
     logger: silentLogger,
     workspace,
   });
@@ -91,7 +98,10 @@ describe("buildToolRegistry wires rate limiting", () => {
     // web_search with the noop provider returns without touching the network,
     // so the only thing that can deny the second call is the rate limiter.
     const built = buildToolRegistry({
-      config: loadConfig({ AURORA_KNOWLEDGE_DIR: knowledgeDir }),
+      config: loadConfig({
+        AURORA_KNOWLEDGE_DIR: knowledgeDir,
+        AURORA_SEARCH_PROVIDER: "noop",
+      }),
       logger: silentLogger,
       workspace,
       rateLimiter: new KeyedRateLimiter({ capacity: 1, refillPerSecond: 0.0001 }),

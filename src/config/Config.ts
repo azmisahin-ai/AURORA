@@ -45,9 +45,11 @@ export const ConfigSchema = z.object({
   sessionDir: z.string().min(1).default("./sessions"),
   recallSessions: z.coerce.number().int().min(0).default(3),
 
-  // Web research. `noop` means no search backend is configured; research then
-  // falls back to fetching known URLs, which is a degraded mode, not an error.
-  searchProvider: z.enum(["noop"]).default("noop"),
+  // Web research. `duckduckgo` is the keyless default: it scrapes DDG's HTML
+  // endpoint, so `research` finds sources with no credential. `noop` disables
+  // search entirely (fetch-known-URLs only). Keyed providers sit behind the
+  // same interface and can be added without touching the loop.
+  searchProvider: z.enum(["duckduckgo", "noop"]).default("duckduckgo"),
   fetchTimeoutMs: z.coerce.number().int().positive().default(30_000),
   fetchMaxBytes: z.coerce.number().int().positive().default(5 * 1024 * 1024),
   /** Cap on characters of untrusted content injected into context. */

@@ -18,6 +18,7 @@ import { SecretRedactor } from "../security/SecretRedactor.js";
 import { LocalExecutionProvider } from "../providers/execution/LocalExecutionProvider.js";
 import { DirectFetcher } from "../providers/web/DirectFetcher.js";
 import { NoopSearchProvider } from "../providers/web/search/NoopSearchProvider.js";
+import { DuckDuckGoSearchProvider } from "../providers/web/search/DuckDuckGoSearchProvider.js";
 import type { SearchProvider } from "../providers/web/search/SearchProvider.js";
 import { FileKnowledgeStore } from "../core/knowledge/FileKnowledgeStore.js";
 import type { KnowledgeStore } from "../core/knowledge/KnowledgeStore.js";
@@ -253,12 +254,15 @@ function defaultConfirmationGate(mode: Config["confirmMode"]): ConfirmationGate 
 }
 
 /**
- * No search backend ships in Phase 3: every candidate provider needs a
- * credential, and AURORA must work without one. The `noop` provider makes that
- * a supported mode rather than an error (ADR 003: no provider lock-in).
+ * Build the search backend. `duckduckgo` is the default because it needs no
+ * credential — a default install can actually find sources. `noop` keeps the
+ * fetch-known-URLs degraded mode explicit. A keyed provider (Brave, Tavily) is
+ * a new `case` here and nothing else changes (ADR 003: no provider lock-in).
  */
 function createSearchProvider(opts: BuildToolRegistryOptions): SearchProvider {
   switch (opts.config.searchProvider) {
+    case "duckduckgo":
+      return new DuckDuckGoSearchProvider({ logger: opts.logger });
     case "noop":
       return new NoopSearchProvider(opts.logger);
     default: {

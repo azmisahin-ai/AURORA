@@ -16,7 +16,7 @@ describe("Config", () => {
     expect(config.logLevel).toBe("info");
     expect(config.allowedCommands).toEqual(defaults.allowedCommands);
     expect(config.blockedCommands).toEqual(defaults.blockedCommands);
-    expect(config.searchProvider).toBe("noop");
+    expect(config.searchProvider).toBe("duckduckgo");
     expect(config.fetchTimeoutMs).toBe(30_000);
     expect(config.fetchMaxBytes).toBe(5 * 1024 * 1024);
     expect(config.untrustedMaxChars).toBe(32_000);
