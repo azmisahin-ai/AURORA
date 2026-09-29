@@ -396,6 +396,44 @@ Env: `AURORA_API_HOST` (127.0.0.1), `AURORA_API_PORT` (8787; 0 = ephemeral),
 non-loopback deployment is expected to sit behind a reverse proxy. Multi-tenant
 authz (per-token scopes) is not designed; the token is a single shared secret.
 
+## Operator UI (Phase 10, ADR 012)
+
+`ui/` is a **separate layer**: framework-free ES modules, served by the API,
+connected to the core only over HTTP. It imports no `src/` module, so it cannot
+become a second entry point into `core`. `tsconfig` excludes `ui/`.
+
+- **Static serving is a security surface.** `/` and `/ui/*` resolve through the
+  *same* `PathValidator` as the file tools, and use **`resolveReal`, not
+  `resolve`** — the route is reachable **without a token**, and a file that is
+  lexically inside `ui/` can still be a symlink out. Do not "simplify" this back
+  to `resolve`; a mutation test (M1) exists precisely for that.
+- **No markup sink.** The UI never sets `innerHTML`/`outerHTML`/
+  `insertAdjacentHTML`/`document.write`; no `eval`, no inline handler. Values
+  are inserted with `textContent`. `tests/unit/ui/ui-xss-guard.test.ts` scans the
+  source (comments stripped) so a future `innerHTML` fails the build.
+- **Headers.** `default-src 'none'` CSP (`script-src 'self'`, `connect-src
+  'self'`), `nosniff`, `no-referrer`; extension allowlist, unknown → `text/plain`.
+- **Shell public, data gated.** `/` and `/ui/*` answer without a token so a
+  browser can load them; every data route stays token-gated. The token lives in
+  `sessionStorage` and is sent as a header, never in a URL.
+- **Panels** need list routes: `GET /runs` (`RunRegistry.list()`, newest first),
+  `GET /tasks`, `GET /knowledge` (metadata only), and `GET
+  /knowledge/:kind/:slug` for the body. The detail route returns the flat
+  metadata shape plus `content`/`path`, matching the list shape.
+- **jsdom is dev-only.** DOM builders are tested under jsdom; the pure
+  formatting module (`ui/lib/format.js`) is tested with no DOM. jsdom is **not**
+  shipped and not needed to run the UI.
+
+Env: `AURORA_UI_DIR` (./ui; empty disables). CLI: `aurora serve [--no-ui]`.
+Note: commander stores `--no-ui` as `ui: false`, **not** `noUi`. The mapping
+lives in `serveEnvOverrides` so it can be tested; reading `options.noUi` compiles
+and is always undefined (see the Phase 10 report).
+
+**Open, tagged DOĞRULANACAK:** `app.js` (event wiring, polling loop) has no
+automated test; it is covered only by a real-browser smoke test. There is no
+streaming — the UI polls every 4s.
+
+
 ## Test harness note
 
 `vitest.config.ts` sets `fileParallelism: false`. All five live integration

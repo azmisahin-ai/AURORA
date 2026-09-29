@@ -95,6 +95,11 @@ export const ConfigSchema = z.object({
   apiRateRefill: z.coerce.number().positive().default(1),
   apiMaxConcurrentRuns: z.coerce.number().int().positive().default(2),
   apiMaxSyncMs: z.coerce.number().int().positive().default(30_000),
+
+  // UI (Phase 10, ADR 012). Served by the API on `/` and `/ui/*` when the
+  // directory exists; the shell is public, every data route still needs the
+  // token. Empty disables the static route entirely.
+  uiDir: z.string().default("./ui"),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -180,6 +185,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     apiRateRefill: env.AURORA_API_RATE_REFILL,
     apiMaxConcurrentRuns: env.AURORA_API_MAX_CONCURRENT_RUNS,
     apiMaxSyncMs: env.AURORA_API_MAX_SYNC_MS,
+
+    uiDir: env.AURORA_UI_DIR,
   };
 
   // Strip undefined so zod .default() applies uniformly, then apply list

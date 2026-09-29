@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildProgram } from "../../src/cli/index.js";
 import { buildConfirmationGate } from "../../src/cli/commands/run.js";
+import { serveEnvOverrides } from "../../src/cli/commands/serve.js";
 
 /**
  * CLI parsing only: these assert that arguments are wired to the right command
@@ -49,6 +50,36 @@ describe("CLI wiring", () => {
     expect(flags).toContain("--host");
     expect(flags).toContain("--port");
     expect(flags).toContain("--allow-mutation");
+  });
+
+  it("maps --no-ui to the ui flag commander actually produces", () => {
+    // The bug this guards: typing the option as `noUi` and reading
+    // `options.noUi`. Commander stores `--no-ui` as `ui: false`, so that code
+    // compiles and is always undefined — the flag silently does nothing.
+    // Assert the *mapping*, not just that the flag is registered: a
+    // registration-only assertion stays green when the action reads the wrong
+    // field.
+    const serve = buildProgram().commands.find((c) => c.name() === "serve")!;
+    serve.parseOptions(["--no-ui"]);
+    const options = serve.opts() as { ui?: boolean };
+    expect(options.ui).toBe(false);
+    expect(serveEnvOverrides(options).AURORA_UI_DIR).toBe("");
+
+    const untouched = buildProgram().commands.find((c) => c.name() === "serve")!;
+    expect(serveEnvOverrides(untouched.opts() as { ui?: boolean }).AURORA_UI_DIR).toBeUndefined();
+  });
+
+  it("maps the other serve options onto their env vars", () => {
+    const env = serveEnvOverrides({
+      host: "0.0.0.0",
+      port: "9000",
+      model: "m",
+      allowMutation: true,
+    });
+    expect(env.AURORA_API_HOST).toBe("0.0.0.0");
+    expect(env.AURORA_API_PORT).toBe("9000");
+    expect(env.AURORA_MODEL).toBe("m");
+    expect(env.AURORA_API_ALLOW_MUTATION).toBe("true");
   });
 
   it("exposes sessions list, show and recall", () => {

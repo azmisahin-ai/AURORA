@@ -14,7 +14,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
 | 7 | Context + Memory | Phase 6 | 2–3 gün | ✅ |
 | 8 | Security Hardening | Phase 7 | 3–4 gün | ✅ |
 | 9 | CLI + API | Phase 8 | 2–3 gün | ✅ |
-| 10 | UI (ayrı katman) | Phase 9 | 4–5 gün | ⬜ |
+| 10 | UI (ayrı katman) | Phase 9 | 4–5 gün | ✅ |
 
 ## Phase 0 acceptance
 
@@ -275,3 +275,36 @@ recorded in ADR 011.
 
 > No phase is advanced until the previous phase's acceptance criteria are met.
 
+
+## Phase 10 acceptance
+
+UI is a separate layer (ADR 012): framework-free ES modules served by the API,
+connected to the core only over HTTP.
+
+- [x] **Separate layer:** `ui/` imports no `src/` module; it talks to the API
+      only. `tsconfig` excludes it, so it cannot be pulled into the core build.
+- [x] **Static serving is a security surface, treated as one:** `/` and `/ui/*`
+      go through the *same* `PathValidator` the filesystem tools use — and use
+      `resolveReal`, not `resolve`, because the route is reachable without a
+      token and a lexically-inside file can be a symlink out. CSP
+      (`default-src 'none'`), `nosniff`, `no-referrer`, extension allowlist.
+- [x] **No markup sink:** the UI never sets `innerHTML`/`outerHTML`/
+      `insertAdjacentHTML`/`document.write`, has no `eval`, no inline handler.
+      Asserted by scanning the source (`tests/unit/ui/ui-xss-guard.test.ts`),
+      not only by probing payloads.
+- [x] **Three panels:** Tasks (status filter, detail), Agents (live + finished
+      runs, trajectory), Knowledge (kind filter, search, detail).
+      `RunRegistry.list()` and `GET /knowledge/:kind/:slug` were added to feed
+      them.
+- [x] **Token handling:** bearer token in `sessionStorage` (not `localStorage`),
+      sent as a header, never in a URL; the shell is public so a browser can load
+      it, data routes stay gated (`tests/integration/ui.test.ts`).
+- [x] **Mutation-tested:** the symlink check, CSP, token check, href scheme
+      allowlist, and `textContent` were each broken; all five turned the suite
+      red, then were restored.
+- [x] **Verified in a real browser:** a deliberately hostile knowledge entry
+      (an `onerror` `<img>`, an inline `<script>`, a `javascript:` source)
+      renders as inert text; the page title does not change and the payload does
+      not run.
+
+> No phase is advanced until the previous phase's acceptance criteria are met.

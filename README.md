@@ -17,7 +17,8 @@ claim either tested or explicitly marked *DOĞRULANACAK*.
 - **Phase 7** — context management + memory tiers (session records, recall): ✅ complete
 - **Phase 8** — security hardening (redaction, confirmation gate, rate limits): ✅ complete
 - **Phase 9** — CLI + HTTP API (`aurora serve`): ✅ complete
-- Phase 10 (UI): not started. See `docs/roadmap.md`.
+- **Phase 10** — UI, a separate layer (`AURORA_UI_DIR`): ✅ complete. See
+  `docs/adr/012`, `docs/reports/phase-10.md`.
 
 ## Requirements
 
@@ -60,6 +61,7 @@ Key variables:
 | `AURORA_API_PORT` | `8787` | API port; `0` picks a free port |
 | `AURORA_API_TOKEN` | — | Bearer token; required for a non-loopback bind |
 | `AURORA_API_ALLOW_MUTATION` | `false` | Whether HTTP runs may change the workspace |
+| `AURORA_UI_DIR` | `./ui` | Directory served at `/` and `/ui/*`; empty disables the UI (Phase 10) |
 
 ## Usage
 
@@ -107,7 +109,11 @@ curl -s -X POST localhost:8787/agent/run \
 | `POST` | `/agent/cancel` | Abort a run by `runId` |
 | `GET` | `/runs/:id` | Run status and result |
 | `GET` | `/tasks/:id` | A persisted task record |
+| `GET` | `/knowledge` | Knowledge entries (metadata only; `?kind=` filter) |
+| `GET` | `/knowledge/:kind/:slug` | One entry including its body |
 | `GET` | `/knowledge/search?q=` | Knowledge search with provenance |
+| `GET` | `/runs` | All live runs, newest first |
+| `GET` | `/` , `/ui/*` | Operator UI (only when `AURORA_UI_DIR` is set) |
 
 The API binds to loopback by default and **refuses to start** on a non-loopback
 address unless `AURORA_API_TOKEN` is set. Because an HTTP request has no terminal,
@@ -117,6 +123,24 @@ tool is refused; set `AURORA_API_ALLOW_MUTATION=true` (or `serve
 
 If the configured provider is unreachable, the CLI exits non-zero with a
 specific message. It never reports a mock or an empty answer as success.
+
+### Operator UI
+
+The UI is a separate layer: framework-free ES modules in `ui/`, served by the API,
+connected to the core only over HTTP. It imports no `src/` module.
+
+```bash
+node dist/cli/index.js serve          # serves ./ui by default
+node dist/cli/index.js serve --no-ui  # API only
+# then open http://127.0.0.1:8787/
+```
+
+Three panels — Tasks, Agents (live and finished runs, trajectory), Knowledge.
+Every value from the API is inserted as **text**; the UI has no `innerHTML`,
+`eval`, or inline handler, and the API sends a `default-src 'none'` CSP. A
+knowledge entry containing `<script>` or `onerror=` renders as inert text. The
+shell is public so a browser can load it; the data routes stay token-gated (the
+token lives in `sessionStorage` and is sent as a header, never in a URL).
 
 ## Testing
 

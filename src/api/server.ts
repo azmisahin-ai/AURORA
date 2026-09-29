@@ -1,10 +1,14 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { AllowAllGate, DenyAllGate, type ConfirmationGate } from "../security/ConfirmationGate.js";
 import { KeyedRateLimiter } from "../security/RateLimiter.js";
+import { PathValidator, PathValidationError } from "../security/PathValidator.js";
 import type { SecretRedactor } from "../security/SecretRedactor.js";
 import type { FileKnowledgeStore } from "../core/knowledge/FileKnowledgeStore.js";
 import type { FileTaskStore } from "../core/task/FileTaskStore.js";
+import type { TaskStatus } from "../core/task/types.js";
 import type { ApiServerOptions, RuntimePort } from "./types.js";
 import { RunCapacityError, RunRegistry } from "./RunRegistry.js";
 
@@ -13,6 +17,12 @@ export interface ApiDeps {
   runtime: RuntimePort;
   tasks: FileTaskStore;
   knowledge: FileKnowledgeStore;
+  /**
+   * Directory holding the Phase 10 UI. When set, its files are served on
+   * `GET /` and `GET /ui/*` (same-origin with the API). When absent, no static
+   * route exists — the API is exactly the Phase 9 surface.
+   */
+  uiDir?: string;
   logger?: import("pino").Logger;
   /**
    * Applied to error strings that leave over HTTP. Log redaction (Phase 8) does
@@ -68,6 +78,10 @@ export function tokenMatches(expected: string, provided: string): boolean {
 export function createApiServer(options: ApiServerOptions, deps: ApiDeps): ApiServer {
   assertSafeBinding(options.host, options.token);
 
+  // One validator for the static UI, rooted at `uiDir`. Built once, not per
+  // request; every request still re-runs the containment (and symlink) check.
+  const uiValidator = deps.uiDir !== undefined ? new PathValidator([deps.uiDir]) : undefined;
+
   const registry = new RunRegistry({
     runtime: deps.runtime,
     maxConcurrentRuns: options.maxConcurrentRuns,
@@ -102,6 +116,16 @@ export function createApiServer(options: ApiServerOptions, deps: ApiDeps): ApiSe
       return sendJson(res, healthy ? 200 : 503, { status: healthy ? "ok" : "degraded" });
     }
 
+    // The UI shell is public for the same reason health is: a browser cannot
+    // attach an Authorization header to a top-level navigation, so a token-gated
+    // index.html is unreachable without putting the token in a URL, which every
+    // proxy would log. The shell carries no data; every data route below still
+    // requires the token (ADR 012 §2).
+    if (deps.uiDir !== undefined && (path === "/" || path === "/ui" || path.startsWith("/ui/"))) {
+      if (req.method !== "GET") return sendJson(res, 405, { error: "method_not_allowed" });
+      return serveStatic(path, res);
+    }
+
     if (options.token !== "") {
       const provided = bearer(req.headers.authorization);
       if (provided === undefined || !tokenMatches(options.token, provided)) {
@@ -120,10 +144,25 @@ export function createApiServer(options: ApiServerOptions, deps: ApiDeps): ApiSe
 
     const runMatch = /^\/runs\/([^/]+)$/.exec(path);
     const taskMatch = /^\/tasks\/([^/]+)$/.exec(path);
+    const knowledgeMatch = /^\/knowledge\/([^/]+)\/([^/]+)$/.exec(path);
 
     if (path === "/knowledge/search" || path === "/knowledge") {
       if (req.method !== "GET") return sendJson(res, 405, { error: "method_not_allowed" });
+      // `/knowledge` without `q` is the browser's list view; with `q` it is a
+      // search. One route, because the UI and the CLI ask the same store the
+      // same way (ADR 012 §2).
+      if (path === "/knowledge" && !url.searchParams.has("q") && !url.searchParams.has("text")) {
+        return handleKnowledgeList(url, res);
+      }
       return handleKnowledgeSearch(url, res);
+    }
+    if (path === "/runs") {
+      if (req.method !== "GET") return sendJson(res, 405, { error: "method_not_allowed" });
+      return sendJson(res, 200, { results: registry.list() });
+    }
+    if (path === "/tasks") {
+      if (req.method !== "GET") return sendJson(res, 405, { error: "method_not_allowed" });
+      return handleTaskList(url, res);
     }
     if (path === "/agent/run") {
       if (req.method !== "POST") return sendJson(res, 405, { error: "method_not_allowed" });
@@ -145,7 +184,56 @@ export function createApiServer(options: ApiServerOptions, deps: ApiDeps): ApiSe
       if (task === null) return sendJson(res, 404, { error: "task_not_found" });
       return sendJson(res, 200, task);
     }
+    if (knowledgeMatch) {
+      if (req.method !== "GET") return sendJson(res, 405, { error: "method_not_allowed" });
+      const kind = decodeURIComponent(knowledgeMatch[1]!);
+      if (!["topic", "source", "research"].includes(kind)) {
+        return sendJson(res, 400, { error: "invalid_kind" });
+      }
+      // A detail view needs the body, which the list route deliberately omits
+      // (it is a display path, not a fetch-everything path). The response is the
+      // flat metadata shape plus `content`/`path`, so the UI renders one shape.
+      const entry = await deps.knowledge.read(
+        kind as "topic" | "source" | "research",
+        decodeURIComponent(knowledgeMatch[2]!),
+      );
+      if (entry === null) return sendJson(res, 404, { error: "knowledge_not_found" });
+      return sendJson(res, 200, { ...entry.metadata, content: entry.content, path: entry.path });
+    }
     return sendJson(res, 404, { error: "not_found" });
+  }
+
+  async function handleKnowledgeList(url: URL, res: ServerResponse): Promise<void> {
+    const kind = url.searchParams.get("kind") ?? undefined;
+    if (kind !== undefined && !["topic", "source", "research"].includes(kind)) {
+      return sendJson(res, 400, { error: "invalid_kind" });
+    }
+    const topic = url.searchParams.get("topic") ?? undefined;
+    const entries = await deps.knowledge.list({
+      ...(kind !== undefined ? { kind: kind as "topic" | "source" | "research" } : {}),
+      ...(topic !== undefined && topic !== "" ? { topic } : {}),
+    });
+    return sendJson(res, 200, { results: entries });
+  }
+
+  async function handleTaskList(url: URL, res: ServerResponse): Promise<void> {
+    const status = url.searchParams.get("status") ?? undefined;
+    const statuses = ["queued", "running", "waiting", "completed", "failed", "cancelled"];
+    if (status !== undefined && !statuses.includes(status)) {
+      return sendJson(res, 400, { error: "invalid_status" });
+    }
+    const limitRaw = url.searchParams.get("limit");
+    const limit = limitRaw === null ? undefined : Number(limitRaw);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+      return sendJson(res, 400, { error: "invalid_limit" });
+    }
+    const tag = url.searchParams.get("tag") ?? undefined;
+    const tasks = await deps.tasks.list({
+      ...(status !== undefined ? { status: status as TaskStatus } : {}),
+      ...(tag !== undefined && tag !== "" ? { tag } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return sendJson(res, 200, { results: tasks });
   }
 
   async function handleKnowledgeSearch(url: URL, res: ServerResponse): Promise<void> {
@@ -240,6 +328,49 @@ export function createApiServer(options: ApiServerOptions, deps: ApiDeps): ApiSe
     return sendJson(res, 200, record);
   }
 
+  async function serveStatic(path: string, res: ServerResponse): Promise<void> {
+    const uiDir = deps.uiDir!;
+    // `/` and `/ui` map to index.html; `/ui/<file>` maps to that file. The path
+    // from the network goes through the *same* PathValidator the filesystem
+    // tools use (ADR 004) — containment is a solved problem here, not a new one.
+    // `resolveReal`, not `resolve`: a file that is *lexically* inside `ui/` can
+    // still be a symlink to somewhere outside it, and this route is reachable
+    // without a token. The symlink check is the reason this is async.
+    const rel = path === "/" || path === "/ui" ? "index.html" : path.slice("/ui/".length);
+    let absolute: string;
+    try {
+      absolute = await uiValidator!.resolveReal(rel, uiDir);
+    } catch (cause) {
+      if (cause instanceof PathValidationError) return sendJson(res, 400, { error: "invalid_path" });
+      throw cause;
+    }
+
+    let body: Buffer;
+    try {
+      body = await readFile(absolute);
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EISDIR") return sendJson(res, 404, { error: "not_found" });
+      throw cause;
+    }
+
+    res.writeHead(200, {
+      "Content-Type": contentTypeFor(absolute),
+      "Content-Length": body.byteLength,
+      "X-Content-Type-Options": "nosniff",
+      // Defense-in-depth beside text-only rendering (ADR 012 §3): with
+      // `script-src 'self'` and no inline scripts, an injected <script> could
+      // not execute even if the structural layer were bypassed; `connect-src
+      // 'self'` means a successful injection could not exfiltrate either.
+      "Content-Security-Policy":
+        "default-src 'none'; script-src 'self'; style-src 'self'; " +
+        "connect-src 'self'; img-src 'self' data:; base-uri 'none'; " +
+        "form-action 'none'; frame-ancestors 'none'; object-src 'none'",
+      "Referrer-Policy": "no-referrer",
+    });
+    res.end(body);
+  }
+
   return {
     server,
     registry,
@@ -270,6 +401,32 @@ function bearer(header: string | undefined): string | undefined {
 /** Rate-limit key: the remote address, or "local" when the socket is gone. */
 function remoteKey(req: IncomingMessage): string {
   return req.socket.remoteAddress ?? "local";
+}
+
+/**
+ * Content type by extension, from a fixed allowlist. A missing mapping is
+ * `text/plain` (never sniffed as HTML) — an unrecognised file should not be
+ * able to become a document.
+ */
+function contentTypeFor(file: string): string {
+  switch (extname(file).toLowerCase()) {
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".ico":
+      return "image/x-icon";
+    default:
+      return "text/plain; charset=utf-8";
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

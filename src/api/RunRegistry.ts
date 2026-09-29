@@ -86,6 +86,15 @@ export class RunRegistry {
   }
 
   /**
+   * All known runs, newest first. The UI's agent panel needs the set, not one
+   * id at a time. In-memory by design (see the class comment), so this is the
+   * full live history, already bounded by `maxRetained`.
+   */
+  list(): ApiRunRecord[] {
+    return [...this.runs.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  /**
    * Abort a running run. Returns the (possibly already-finished) record, or
    * undefined when the id is unknown. Aborting a finished run is a no-op that
    * reports the terminal state, not an error.
