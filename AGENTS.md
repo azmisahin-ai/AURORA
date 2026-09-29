@@ -565,3 +565,32 @@ marginal for multi-step research; `qwen2.5:7b` passes everything. The schema
 rejection path works correctly — the model is fed the validation error as an
 observation — but a 1B model cannot act on it. Do not "fix" a weak-model failure
 in the runtime; reproduce against `qwen2.5:7b` first.
+
+**2026-09-29 — event visibility (M0/CAP-004) + two correctness bugs it exposed.**
+A single `EventBus` (`src/events/`) is now the one place "what happened" is
+recorded: the agent loop emits lifecycle/model/tool/verification/file events, the
+run registry wraps them with run lifecycle, the API streams them as SSE
+(`GET /runs/:id/events`, `GET /events`, reconnect via `?after=<sequence>`), and
+the operator UI renders the timeline live. The UI event wiring that ADR 012
+previously tagged DOGRULANACAK is now covered: `tests/unit/ui/format.test.ts`
+(event class/summary allowlists) and `tests/unit/ui/panels.test.ts`
+(`eventTimeline`, hostile payload), plus `tests/unit/agent/agent-loop-events.test.ts`
+and `tests/integration/events-sse.test.ts`. Full suite live with `qwen2.5:7b`:
+**62 files, 603 tests, 0 failed**.
+
+Two bugs found by exercising the real server, not by reading code:
+
+1. **`after=0` replayed nothing.** `EventBus.subscribe` skipped the replay ring
+   when `after` was `0`, so a client that connected *after* a run finished got an
+   empty timeline - the exact case catch-up exists to serve. `0` now means "I
+   hold nothing; send the ring". Guarded by the `after = 0` case in
+   `tests/unit/events/event-bus.test.ts` and `tests/integration/events-sse.test.ts`.
+
+2. **A refused mutation reported `completed`.** With a deny-all gate, the model
+   would ask to write, the tool would be denied, the model would say "done", and
+   the loop returned `completed` on the model word alone - the same
+   NOT_VERIFIED-as-COMPLETED mistake ADR 010 exists to prevent, in the permission
+   dimension. `ToolExecutionResult.denied` now marks a gate refusal, `RunStatus`
+   gained `denied`, and the loop reports it honestly (terminal event
+   `agent.failed`). A later approved mutation supersedes an earlier denial.
+   Guarded by `tests/unit/agent/agent-loop-denial.test.ts`.
