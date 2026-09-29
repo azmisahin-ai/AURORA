@@ -156,13 +156,33 @@ tagged **DOĞRULANACAK** below, not assumed.
 
 - **Markdown/rich rendering.** Not implemented; would require an audited
   sanitizer and a fresh ADR. Until then everything is text.
-- **Real-time updates.** The UI polls; there is no SSE/WebSocket endpoint.
-  Acceptable for a viewer; revisit with the framework trigger in Decision 1.
 - **CSRF.** With a bearer token in a header (not a cookie), classic CSRF does not
   apply — an attacker's page cannot read `sessionStorage` for this origin and
   cannot set the header cross-origin without a CORS preflight we do not allow.
   This reasoning is sound but is **not** covered by a dedicated test; tagged
   DOĞRULANACAK.
+
+## Resolved after the initial ADR (2026-09-29)
+
+- **Real-time updates (was: "the UI polls; there is no SSE/WebSocket endpoint").**
+  The run view now streams over SSE: the runtime emits into a single `EventBus`,
+  `GET /runs/:id/events` (and `GET /events`) frame it as `text/event-stream`, and
+  `ui/lib/api.js` consumes it with `fetch` + a streaming reader rather than
+  `EventSource` — `EventSource` cannot send an `Authorization` header, and a
+  token in a query string is logged by every proxy on the path (§2 above). The
+  client reconnects with `?after=<lastSequence>` and the server replays the gap
+  from a bounded ring, so a reconnect does not silently lose events. List views
+  still poll; only the run timeline streams.
+- **`app.js` event wiring had no automated test (was a "Kalan Problem" in the
+  Phase 10 report).** The pure rules it depends on are now unit-tested
+  (`eventClass`, `summarizeEvent` in `tests/unit/ui/format.test.ts`) and the
+  timeline builder is tested under jsdom (`eventTimeline`, including a hostile
+  payload, in `tests/unit/ui/panels.test.ts`). The `fetch`-based SSE client
+  (`ui/lib/api.js`) is tested against a real `node:http` server in
+  `tests/integration/ui-sse-client.test.ts` — reconnect with `?after`, gap
+  detection, and disposer teardown are all exercised over a real socket. What
+  remains browser-only is the `app.js` wiring itself: which panel mounts the
+  timeline and when the stream starts and stops.
 
 ## Sources (accessed 2026-09-28)
 

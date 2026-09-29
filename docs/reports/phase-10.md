@@ -123,8 +123,26 @@ payload gerçek tarayıcıda **inert**.
 
 - UI'de gerçek zamanlı akış yok; 4 sn'lik polling var. ADR 012'de framework'e
   geçiş tetikleyicisi açıkça yazıldı.
-- `panels.js` kapsamı iyi ama `app.js` (olay bağlama, polling döngüsü) yalnızca
-  tarayıcı duman testiyle kapsanıyor, otomatik testi yok.
+
+> **Güncelleme (2026-09-29).** Bu iki kalem kapandı; ayrıntı ADR 012'nin
+> "Resolved after the initial ADR" bölümünde.
+>
+> - **Gerçek zamanlı akış eklendi.** Run görünümü artık SSE ile akıyor
+>   (`GET /runs/:id/events`, `?after=<sequence>` ile replay). Liste görünümleri
+>   hâlâ polling yapıyor; yalnızca timeline akıyor.
+> - **`app.js` event wiring'i artık kısmen otomatik test ediliyor.** Saf kurallar
+>   (`eventClass`, `summarizeEvent`) ve timeline kurucusu (`eventTimeline`,
+>   zararlı payload dahil) unit testlerle kapsandı; `fetch` tabanlı SSE istemcisi
+>   (`ui/lib/api.js`) gerçek bir `node:http` sunucusuna karşı
+>   `tests/integration/ui-sse-client.test.ts`'te test ediliyor (`?after` ile
+>   yeniden bağlanma, gap tespiti, disposer teardown). Yalnızca `app.js`'in
+>   kendisi — timeline'ı hangi panelin bağladığı ve akışın ne zaman
+>   başlayıp durduğu — tarayıcı duman testiyle kapsanıyor.
+>
+> Tarayıcıda uçtan uca doğrulandı: bitmiş bir run'a `after=0` ile bağlanan
+> istemci 7 olayın tamamını (#1 `run.created` … #7 `run.failed`) sıra
+> numaralarıyla, doğru sınıflarla ve zaman damgalarıyla render etti. Ollama
+> yokluğu `failed` olarak dürüstçe raporlandı; "başarılı" denmedi.
 
 ## Sonraki Faz İçin Notlar
 

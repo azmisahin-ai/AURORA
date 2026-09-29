@@ -594,3 +594,25 @@ Two bugs found by exercising the real server, not by reading code:
    gained `denied`, and the loop reports it honestly (terminal event
    `agent.failed`). A later approved mutation supersedes an earlier denial.
    Guarded by `tests/unit/agent/agent-loop-denial.test.ts`.
+
+**2026-09-29 (devam) — SSE istemcisi artik otomatik test ediliyor; ortam notu.**
+`ui/lib/api.js` icindeki `fetch` tabanli SSE istemcisi, ADR 012de "yalnizca
+tarayici duman testi" olarak isaretliydi. Artik gercek bir `node:http` sunucusuna
+karsi `tests/integration/ui-sse-client.test.ts` ile test ediliyor: `?after` ile
+yeniden baglanma, gap tespiti (`onGap`) ve disposer teardown gercek soket
+uzerinde kosuyor. Iki mutasyon (after parametresini sabitlemek; gap kontrolunu
+kapatmak) ilgili testi kirmiziya dondurdu, yani testler gercekten koruyor.
+Tarayici-only kalan tek sey `app.js`in kendisi (hangi panel timelinei baglar,
+akis ne zaman baslar/durur). Suite: **63 dosya, 606 test (601 passed, 5 skipped)**.
+
+**ORTAM NOTU (onemli).** Bu oturumda Ollama artik kurulu/calismiyor: `ollama`
+binarysi yok, 11434 portu kapali, container yok. Bu yuzden 5 canli integration
+testi SKIP ediliyor (Ollama NOT reachable) ve suite "PASS" demiyor, "skipped"
+diyor — dogru davranis. Daha once (ayni gun) qwen2.5:7b ile 603 test yesildi.
+Canli bir model gerektiren bir sey dogrulanacaksa once `curl localhost:11434`
+ile Ollama varligini kontrol et; yoksa sonucu SKIP olarak raporla, PASS deme.
+
+**UI canli timeline tarayicida dogrulandi.** `aurora serve` (0.0.0.0 + token)
+work host uzerinden acildi; bitmis bir runa baglanan istemci 7 olayi (#1
+run.created .. #7 run.failed) sira numaralari, dogru siniflar ve zaman
+damgalariyla render etti. Ollama yoklugu `failed` olarak durustce gosterildi.
