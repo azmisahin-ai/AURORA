@@ -441,3 +441,49 @@ tests drive the **same** single Ollama instance; in parallel they queue behind
 one another until a 300s test timeout fires — a flake unrelated to the code
 under test. Serialising files costs a few seconds on the unit suite and makes
 the suite deterministic. This is a harness fix, not a skip.
+
+**Stochastic models need bounded retries, not weaker assertions.**
+`research-live` and `subagent-live` assert on real evidence (a file on disk, a
+`delegate` call in the trajectory). A capable model can still, on one sample,
+answer without doing the work, so each test allows up to
+`AURORA_TEST_LIVE_ATTEMPTS` (default 3) full runs. The assertion is unchanged
+and is *not* satisfied by a run that merely claims success; the retry removes
+sampling luck, not the test's teeth. Verified: with `llama3.2:1b` the test still
+fails (0 knowledge files) even at 2 attempts.
+
+## Verification log
+
+**2026-09-29 — full system verified green with a live provider.** Ollama v0.34.4
+(CPU-only), `qwen2.5:7b`: `npx vitest run` → **56 files, 557 tests, 0 failed,
+0 skipped**. All 15 integration files passed live, including `research-live`,
+`subagent-live`, `tool-use-live`, `memory-live`, `ollama-live`,
+`verification-live`, `web-live`. `aurora serve` + the operator UI were driven in
+a real browser (run created from the UI, status polled, detail panel rendered).
+
+Two production issues were found and fixed during this verification:
+
+1. **Windows CLI silently did nothing.** `process.argv[1]` is
+   `C:\AURORA\dist\cli\index.js` with backslashes, but the entry check used
+   `endsWith("cli/index.js")`, so the CLI entry was never detected. Fixed with
+   resolved-URL comparison (`realpathSync` + `pathToFileURL`); guarded by
+   `tests/unit/cli-entry.test.ts` and `isEntryPoint()`'s exported shape. The
+   mutation test (restoring the suffix check) fails that guard.
+2. **`research` reported success with nothing written.** The loop can report
+   `completed` on the model's word alone, so `research` now checks the trajectory
+   for a successful `knowledge_write` and exits non-zero with a specific message
+   when the topic was not persisted. Guarded by the `didPersistFinding` test in
+   `tests/unit/cli.test.ts`.
+
+**Model capability is the dominant reliability variable** (measured, not
+asserted): `llama3.2:1b` emits malformed/nested tool calls, omits required
+arguments, and loops to a bound; `llama3.2:3b` passes single-tool tasks and is
+marginal for multi-step research; `qwen2.5:7b` passes everything. The schema
+rejection path works correctly — the model is fed the validation error as an
+observation — but a 1B model cannot act on it. Do not "fix" a weak-model failure
+in the runtime; reproduce against `qwen2.5:7b` first.
+
+**Enforced rule for tool arguments.** Small models frequently send `"true"` for a
+boolean or a number as a string. `ToolRegistry` validates against the zod schema
+and returns the issue text as the observation (correct), but it does not coerce.
+Coercion is a deliberate non-goal until there is a test for it; a schema that
+accepts the string form would silently change what a tool receives.

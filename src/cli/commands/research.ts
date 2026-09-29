@@ -2,6 +2,19 @@ import type { Command } from "commander";
 import { loadConfig } from "../../config/Config.js";
 import { createLogger } from "../../observability/Logger.js";
 import { AgentRuntime } from "../../core/agent/AgentRuntime.js";
+import type { RunResult } from "../../core/agent/types.js";
+
+/**
+ * True when the run actually persisted a finding. The loop can report
+ * `completed` on the model's word alone, so a green status is not evidence the
+ * knowledge store was written; this checks the trajectory for a real, successful
+ * `knowledge_write`. Exported for a test.
+ */
+export function didPersistFinding(result: RunResult): boolean {
+  return result.trajectory.some(
+    (entry) => entry.toolCall?.name === "knowledge_write" && entry.toolResult?.ok === true,
+  );
+}
 
 export interface ResearchCommandOptions {
   maxIterations?: string;
@@ -63,6 +76,21 @@ export function registerResearchCommand(program: Command): void {
       const result = await runtime.createLoop().run(task);
 
       if (result.output) process.stdout.write(`${result.output}\n`);
+
+      // A finished run is not the same as a research finding: the loop may
+      // complete on the model's word alone. The deliverable of this command is
+      // a persisted entry, so say plainly when there is none rather than let a
+      // green status imply the topic was researched and stored.
+      const saved = didPersistFinding(result);
+      if (result.status === "completed" && !saved) {
+        process.stderr.write(
+          "aurora: research completed but wrote NOTHING to the knowledge store " +
+            "(no successful knowledge_write call). The topic was not persisted.\n",
+        );
+        process.exitCode = 1;
+        return;
+      }
+
       if (result.status !== "completed") {
         process.stderr.write(
           `aurora: research ended with status "${result.status}" after ` +

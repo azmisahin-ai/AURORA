@@ -26,6 +26,34 @@ claim either tested or explicitly marked *DOĞRULANACAK*.
 - An LLM provider: either a local [Ollama](https://ollama.com) server, or any
   OpenAI-compatible endpoint.
 
+### Model capability (read this first)
+
+The runtime is model-agnostic, but multi-step tool calling needs a capable
+model. Verified on 2026-09-29 against Ollama v0.34.4 on a CPU-only host:
+
+| Model | Result |
+|---|---|
+| `llama3.2:1b` | Too weak. Emits malformed/nested tool calls, omits required arguments, loops to a bound. |
+| `llama3.2:3b` | Works for single-tool tasks; marginal for multi-step research. |
+| `qwen2.5:7b` | Passes every live integration test, including research and sub-agents. |
+
+If a run ends non-zero, the CLI prints the reason; rule out the model first.
+
+### Windows
+
+The CLI works on Windows (verified via `pathToFileURL`-based entry detection;
+see `src/cli/index.ts`). On PowerShell, set env vars per-invocation with
+`$env:`, not `VAR=value`:
+
+```powershell
+$env:AURORA_MODEL = "qwen2.5:7b"
+node dist/cli/index.js run "Merhaba de"
+```
+
+`npm install`, `npm run build`, `npm run dev`, and `aurora serve` all work from
+`C:\AURORA`. If a command exits silently, that is a bug, not expected
+behaviour — every command either prints a result or a specific error.
+
 ## Install
 
 ```bash
@@ -66,9 +94,12 @@ Key variables:
 ## Usage
 
 ```bash
-# With a local Ollama server
+# With a local Ollama server. Use a capable model — see "Model capability" above.
 ollama serve            # in another terminal
-node dist/cli/index.js run "Merhaba de"
+AURORA_MODEL=qwen2.5:7b node dist/cli/index.js run "Merhaba de"
+
+# Same, in dev mode (no build step; runs the TypeScript directly via tsx)
+AURORA_MODEL=qwen2.5:7b npm run dev -- run "Merhaba de"
 
 # Override per-invocation
 node dist/cli/index.js run "Node.js hakkında araştırma yap" --max-iterations 10
@@ -160,6 +191,12 @@ running. A skipped test is never reported as a pass. Force the behaviour with:
 AURORA_TEST_OLLAMA=0 npm test   # force-skip
 AURORA_TEST_OLLAMA=1 npm test   # force-run (fails if unreachable)
 ```
+
+Live tests assert on real, on-disk evidence, not the model's prose, so a run that
+only claims success fails. Because sampling models are stochastic, the research
+and sub-agent tests allow up to `AURORA_TEST_LIVE_ATTEMPTS` (default 3) full runs
+before concluding; the assertion itself is unchanged. The retry tolerates luck,
+not an incapable model — `llama3.2:1b` fails these tests even at 2 attempts.
 
 ## Architecture
 

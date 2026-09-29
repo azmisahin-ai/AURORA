@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { buildProgram } from "../../src/cli/index.js";
 import { buildConfirmationGate } from "../../src/cli/commands/run.js";
 import { serveEnvOverrides } from "../../src/cli/commands/serve.js";
+import { didPersistFinding } from "../../src/cli/commands/research.js";
+import type { RunResult, TrajectoryEntry } from "../../src/core/agent/types.js";
 
 /**
  * CLI parsing only: these assert that arguments are wired to the right command
@@ -32,6 +34,49 @@ describe("CLI confirmation gate mapping", () => {
 });
 
 describe("CLI wiring", () => {
+  function entry(partial: Partial<TrajectoryEntry>): TrajectoryEntry {
+    return {
+      iteration: 1,
+      step: { kind: "final" },
+      assistantContent: "",
+      ...partial,
+    } as TrajectoryEntry;
+  }
+  function result(trajectory: TrajectoryEntry[]): RunResult {
+    return { status: "completed", output: "", iterations: 1, toolCalls: 1, trajectory };
+  }
+
+  it("treats a research run as persisted only on a successful knowledge_write", () => {
+    // The bug this guards: the loop can report `completed` with no tool call at
+    // all, and `research` used to call that a success. The command now exits
+    // non-zero unless the finding was really stored.
+    expect(didPersistFinding(result([]))).toBe(false);
+    expect(
+      didPersistFinding(
+        result([
+          entry({
+            toolCall: { name: "knowledge_write", arguments: {} },
+            toolResult: { ok: false, observation: "Invalid arguments" },
+          }),
+        ]),
+      ),
+    ).toBe(false);
+    expect(
+      didPersistFinding(
+        result([
+          entry({
+            toolCall: { name: "web_fetch", arguments: {} },
+            toolResult: { ok: true, observation: "fetched" },
+          }),
+          entry({
+            toolCall: { name: "knowledge_write", arguments: {} },
+            toolResult: { ok: true, observation: "saved" },
+          }),
+        ]),
+      ),
+    ).toBe(true);
+  });
+
   it("registers run, research, knowledge, tasks, sessions and serve", () => {
     const names = buildProgram()
       .commands.map((c) => c.name());
