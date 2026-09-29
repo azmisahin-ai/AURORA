@@ -57,3 +57,20 @@ export type {
   RateLimitDecision,
   RedactionFinding,
 } from "./security/index.js";
+export {
+  createApiServer,
+  apiConfirmationGate,
+  assertSafeBinding,
+  isLoopbackHost,
+  tokenMatches,
+  RunRegistry,
+  RunCapacityError,
+} from "./api/index.js";
+export type {
+  ApiDeps,
+  ApiRunRecord,
+  ApiRunStatus,
+  ApiServer,
+  ApiServerOptions,
+  RuntimePort,
+} from "./api/index.js";

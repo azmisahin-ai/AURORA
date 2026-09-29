@@ -80,6 +80,21 @@ export const ConfigSchema = z.object({
     "echo",
   ]),
   blockedCommands: z.array(z.string()).default(["rm", "curl", "wget", "ssh", "scp"]),
+
+  // HTTP API (Phase 9, ADR 011). Loopback by default; a non-loopback bind is
+  // refused at startup unless `apiToken` is set. `apiAllowMutation` defaults to
+  // false so an HTTP run uses a deny-all gate: a state-changing tool is refused
+  // because there is no one at a terminal to confirm it. Tokens are compared
+  // in constant time and never logged.
+  apiHost: z.string().min(1).default("127.0.0.1"),
+  apiPort: z.coerce.number().int().min(0).max(65_535).default(8787),
+  apiToken: z.string().default(""),
+  apiAllowMutation: booleanFromString().default(false),
+  apiMaxBodyBytes: z.coerce.number().int().positive().default(256 * 1024),
+  apiRateLimit: z.coerce.number().int().min(0).default(60),
+  apiRateRefill: z.coerce.number().positive().default(1),
+  apiMaxConcurrentRuns: z.coerce.number().int().positive().default(2),
+  apiMaxSyncMs: z.coerce.number().int().positive().default(30_000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -155,6 +170,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
     allowedCommands: splitList(env.AURORA_ALLOWED_COMMANDS),
     blockedCommands: splitList(env.AURORA_BLOCKED_COMMANDS),
+
+    apiHost: env.AURORA_API_HOST,
+    apiPort: env.AURORA_API_PORT,
+    apiToken: env.AURORA_API_TOKEN,
+    apiAllowMutation: env.AURORA_API_ALLOW_MUTATION,
+    apiMaxBodyBytes: env.AURORA_API_MAX_BODY_BYTES,
+    apiRateLimit: env.AURORA_API_RATE_LIMIT,
+    apiRateRefill: env.AURORA_API_RATE_REFILL,
+    apiMaxConcurrentRuns: env.AURORA_API_MAX_CONCURRENT_RUNS,
+    apiMaxSyncMs: env.AURORA_API_MAX_SYNC_MS,
   };
 
   // Strip undefined so zod .default() applies uniformly, then apply list

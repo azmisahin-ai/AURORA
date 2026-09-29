@@ -175,9 +175,49 @@ With JSON metadata (`topic`, `source`, `retrievedAt`, `provider`, `verified`).
   - `buildToolRegistry` wiring is itself under test: config → cap/gate/redactor/
     limiter, with mutation guards.
 
-## 8. Current build state
+## 8. HTTP API (Phase 9, ADR 011)
 
-This repository is being built phase by phase. As of the Phase 8 report:
+`src/api` is a peer of `cli`: it depends on `core` through a narrow port and on
+`security`, and `core` never imports it. The server is a real `node:http` server
+built from injected ports — no web framework, so no new dependency surface for
+five routes (ADR 011 §1).
+
+```
+node:http ── auth ── rate limit ── router ──┬─▶ /health            (RuntimePort.health)
+                                            ├─▶ /agent/run ──▶ RunRegistry ──▶ RuntimePort.runTask
+                                            ├─▶ /agent/cancel ──▶ RunRegistry.cancel (AbortController)
+                                            ├─▶ /runs/:id       (RunRegistry)
+                                            ├─▶ /tasks/:id      (FileTaskStore)
+                                            └─▶ /knowledge/search (FileKnowledgeStore)
+```
+
+- **Ports, not providers** — the server knows `RuntimePort` (`runTask`,
+  `health`), not `LLMProvider`. `AgentRuntime` satisfies it structurally, so the
+  real runtime is passed in production and a scripted fake in tests; the API
+  suite therefore needs no model.
+- **Async by default** — `POST /agent/run` returns `202` + `runId`; a run is
+  polled via `GET /runs/:id` and aborted via `POST /agent/cancel`. `?wait=1`
+  runs inline, bounded by `AURORA_API_MAX_SYNC_MS`, and answers `202` rather than
+  hanging if the bound is reached.
+- **Bounded** — at most `AURORA_API_MAX_CONCURRENT_RUNS` run at once (further
+  requests get `429`), finished history is pruned, the body is capped while
+  streaming, and requests are rate-limited per client by the Phase 8 limiter.
+- **Runs are not persisted** — deliberately. A half-executed command is not
+  resumable; durable work is Phase 6's `tasks`. Stated, not implied.
+- **Trust model (ADR 011 §3)** — loopback bind by default; a non-loopback bind
+  is refused at startup without a token; bearer auth is constant-time; `/health`
+  is the only unauthenticated route.
+- **Fail closed on mutation** — `AURORA_API_ALLOW_MUTATION` defaults to false, so
+  an HTTP run gets a deny-all `ConfirmationGate`: a state-changing tool is
+  refused because there is no terminal to confirm it. The Phase 8 seam is reused,
+  not duplicated — this is the clearest payoff of keeping the gate a port.
+- **Errors are scrubbed** — a provider error surfaced over HTTP (thrown or
+  carried in an `error`-status result) passes through `SecretRedactor`, because
+  log redaction does not reach a response body.
+
+## 9. Current build state
+
+This repository is being built phase by phase. As of the Phase 9 report:
 
 - **Phase 0** — research docs and ADRs: complete.
 - **Phase 1** — Config, LLM provider interfaces + Ollama/OpenAI-compatible
@@ -197,19 +237,23 @@ This repository is being built phase by phase. As of the Phase 8 report:
 - **Phase 8** — security hardening: shape-based secret redaction, three-valued
   confirmation gate, per-tool network rate limiting, argument size cap, and
   tested `buildToolRegistry` wiring: complete.
+- **Phase 9** — CLI + API: `aurora serve`, a `node:http` API over injected ports
+  with async runs, cancellation, bounded concurrency, auth, rate limiting and a
+  fail-closed mutation policy: complete.
 
 ### Environment constraints observed during the build
 
 - Node.js v24.21.0, npm 11.19.1.
 - **Ollama may or may not be present.** Live-provider tests skip (and say so)
   when it is unreachable. Unit tests use a real local HTTP server (not a mocked
-  provider) to exercise the HTTP/NDJSON code paths.
+  provider) to exercise the HTTP/NDJSON code paths, and the API tests use a real
+  server with a scripted runtime port.
 - **`node --test` exits 0 when it matches no test files** (verified on Node
   v24.21.0). Verification treats that vacuous run as failure; see `ranNoTests`.
 - Network egress works (npm registry and docs.ollama.com reachable), so research
   was performed live rather than from memory.
 
-## 8. References
+## 10. References
 
 - `docs/roadmap.md` — phase plan and status.
 - `docs/adr/*` — architectural decisions.

@@ -159,4 +159,44 @@ describe("Config", () => {
   it("rejects an unknown confirm mode", () => {
     expect(() => loadConfig({ AURORA_CONFIRM_MODE: "ask" })).toThrow(/confirmMode/);
   });
+
+  it("defaults the HTTP API to a safe, loopback-only, non-mutating bind", () => {
+    const config = loadConfig({});
+    expect(config.apiHost).toBe("127.0.0.1");
+    expect(config.apiPort).toBe(8787);
+    expect(config.apiToken).toBe("");
+    expect(config.apiAllowMutation).toBe(false);
+    expect(config.apiMaxBodyBytes).toBe(256 * 1024);
+    expect(config.apiRateLimit).toBe(60);
+    expect(config.apiMaxConcurrentRuns).toBe(2);
+    expect(config.apiMaxSyncMs).toBe(30_000);
+  });
+
+  it("reads Phase 9 API settings from the environment", () => {
+    const config = loadConfig({
+      AURORA_API_HOST: "0.0.0.0",
+      AURORA_API_PORT: "9000",
+      AURORA_API_TOKEN: "t",
+      AURORA_API_ALLOW_MUTATION: "true",
+      AURORA_API_MAX_BODY_BYTES: "1024",
+      AURORA_API_RATE_LIMIT: "0",
+      AURORA_API_RATE_REFILL: "5",
+      AURORA_API_MAX_CONCURRENT_RUNS: "4",
+      AURORA_API_MAX_SYNC_MS: "1000",
+    });
+    expect(config.apiHost).toBe("0.0.0.0");
+    expect(config.apiPort).toBe(9000);
+    expect(config.apiToken).toBe("t");
+    expect(config.apiAllowMutation).toBe(true);
+    expect(config.apiMaxBodyBytes).toBe(1024);
+    expect(config.apiRateLimit).toBe(0);
+    expect(config.apiRateRefill).toBe(5);
+    expect(config.apiMaxConcurrentRuns).toBe(4);
+    expect(config.apiMaxSyncMs).toBe(1000);
+  });
+
+  it("treats the string 'false' as false for API mutation, and rejects a bad port", () => {
+    expect(loadConfig({ AURORA_API_ALLOW_MUTATION: "false" }).apiAllowMutation).toBe(false);
+    expect(() => loadConfig({ AURORA_API_PORT: "70000" })).toThrow(/apiPort/);
+  });
 });

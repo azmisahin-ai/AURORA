@@ -13,7 +13,7 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
 | 6 | Persistence + Task Recovery | Phase 5 | 2–3 gün | ✅ |
 | 7 | Context + Memory | Phase 6 | 2–3 gün | ✅ |
 | 8 | Security Hardening | Phase 7 | 3–4 gün | ✅ |
-| 9 | CLI + API | Phase 8 | 2–3 gün | ⬜ |
+| 9 | CLI + API | Phase 8 | 2–3 gün | ✅ |
 | 10 | UI (ayrı katman) | Phase 9 | 4–5 gün | ⬜ |
 
 ## Phase 0 acceptance
@@ -229,6 +229,49 @@ Status legend: ✅ done · 🚧 in progress · ⬜ not started · ⏭️ deferre
       registry, real validators and a real pino logger
       (`tests/integration/security-hardening.test.ts`; canlı suite dahil
       483 test / 0 FAIL).
+
+> No phase is advanced until the previous phase's acceptance criteria are met.
+
+## Phase 9 acceptance
+
+Framework choice researched at implementation time, as Phase 0 required, and
+recorded in ADR 011.
+
+- [x] **CLI:** `run`, `research`, `tasks`, `knowledge`, `sessions` already
+      existed; Phase 9 adds `serve` to start the API. `tests/unit/cli.test.ts`
+      asserts every command is registered and that `serve` exposes
+      `--host/--port/--allow-mutation`.
+- [x] **HTTP API:** `GET /health`, `POST /agent/run`, `POST /agent/cancel`,
+      `GET /runs/:id`, `GET /tasks/:id`, `GET /knowledge/search` — all over a
+      real `node:http` server in `tests/integration/api.test.ts` (15 tests), with
+      a scripted runtime port so the suite needs **no Ollama**.
+- [x] **Async by default:** `POST /agent/run` returns `202` + `runId`;
+      `GET /runs/:id` reports the result; `POST /agent/cancel` aborts a running
+      run via `AbortController` and the run reports `cancelled`. `?wait=1` runs
+      inline, bounded by `AURORA_API_MAX_SYNC_MS`, and never hangs a socket.
+- [x] **Bounded concurrency:** beyond `AURORA_API_MAX_CONCURRENT_RUNS`, a new
+      run is refused `429`, not queued unboundedly. History is pruned, so a
+      long-lived server is not a memory leak with a nice API.
+- [x] **Trust model (ADR 011 §3):** loopback bind by default; a non-loopback
+      bind is **refused at startup without a token**; bearer auth uses a
+      constant-time comparison; `/health` is the only unauthenticated route.
+- [x] **Fail closed on mutation:** `AURORA_API_ALLOW_MUTATION` defaults to
+      false, so an HTTP run uses a deny-all gate — a state-changing tool is
+      refused because there is no terminal to confirm it. The Phase 8
+      `ConfirmationGate` seam is reused, not duplicated.
+- [x] **Bounded request body** enforced *while streaming* (413 + socket
+      destroy); malformed JSON is 400, not a silent default.
+- [x] **Rate limiting** per client reusing the Phase 8 `KeyedRateLimiter`
+      (429 + `Retry-After`); `/health` is exempt so liveness always answers.
+- [x] **Secrets do not leak in responses:** a provider error surfaced over HTTP
+      — thrown *or* carried in an `error`-status result — is scrubbed, because
+      log redaction does not reach a response body.
+- [x] **Mutation-tested:** five controls (public-bind refusal, token check,
+      mutation gate, body cap, rate limit) were each broken; all five turned the
+      suite red, then were restored.
+- [x] Verified end to end by hand: `aurora serve` prints the bound address and
+      answers `/health`, `/knowledge/search` and `/agent/run` (the last correctly
+      reports an unreachable Ollama rather than pretending success).
 
 > No phase is advanced until the previous phase's acceptance criteria are met.
 

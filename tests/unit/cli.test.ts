@@ -31,7 +31,7 @@ describe("CLI confirmation gate mapping", () => {
 });
 
 describe("CLI wiring", () => {
-  it("registers run, research, knowledge, tasks and sessions", () => {
+  it("registers run, research, knowledge, tasks, sessions and serve", () => {
     const names = buildProgram()
       .commands.map((c) => c.name());
     expect(names).toContain("run");
@@ -39,6 +39,16 @@ describe("CLI wiring", () => {
     expect(names).toContain("knowledge");
     expect(names).toContain("tasks");
     expect(names).toContain("sessions");
+    expect(names).toContain("serve");
+  });
+
+  it("exposes the Phase 9 serve options", () => {
+    const program = buildProgram();
+    const serve = program.commands.find((c) => c.name() === "serve")!;
+    const flags = serve.options.map((o) => o.long);
+    expect(flags).toContain("--host");
+    expect(flags).toContain("--port");
+    expect(flags).toContain("--allow-mutation");
   });
 
   it("exposes sessions list, show and recall", () => {

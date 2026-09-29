@@ -14,7 +14,10 @@ claim either tested or explicitly marked *DOĞRULANACAK*.
 - **Phase 4** — code execution + external verification loop: ✅ complete
 - **Phase 5** — sub-agent system (roles, delegation, least privilege): ✅ complete
 - **Phase 6** — persistence + task recovery (durable tasks, restart recovery): ✅ complete
-- Phases 7–10: not started. See `docs/roadmap.md`.
+- **Phase 7** — context management + memory tiers (session records, recall): ✅ complete
+- **Phase 8** — security hardening (redaction, confirmation gate, rate limits): ✅ complete
+- **Phase 9** — CLI + HTTP API (`aurora serve`): ✅ complete
+- Phase 10 (UI): not started. See `docs/roadmap.md`.
 
 ## Requirements
 
@@ -51,6 +54,12 @@ Key variables:
 | `AURORA_MAX_SUB_AGENTS` | `3` | Cap on sub-agent delegations; 0 disables (Phase 5) |
 | `AURORA_TASK_DIR` | `./tasks` | Durable task record root (Phase 6) |
 | `AURORA_TASK_MAX_ATTEMPTS` | `3` | Attempts before a task is failed rather than requeued |
+| `AURORA_SESSION_DIR` | `./sessions` | Session memory root (Phase 7) |
+| `AURORA_RECALL_SESSIONS` | `3` | Prior sessions injected as untrusted recall; 0 disables |
+| `AURORA_API_HOST` | `127.0.0.1` | API bind address (Phase 9) |
+| `AURORA_API_PORT` | `8787` | API port; `0` picks a free port |
+| `AURORA_API_TOKEN` | — | Bearer token; required for a non-loopback bind |
+| `AURORA_API_ALLOW_MUTATION` | `false` | Whether HTTP runs may change the workspace |
 
 ## Usage
 
@@ -80,7 +89,31 @@ AURORA_LLM_PROVIDER=openai-compatible \
 OPENAI_COMPATIBLE_BASE_URL=http://localhost:1234/v1 \
 AURORA_MODEL=local-model \
 node dist/cli/index.js run "Merhaba de"
+
+# HTTP API (Phase 9). Loopback only, and mutation denied unless opted in.
+node dist/cli/index.js serve
+curl -s localhost:8787/health
+curl -s "localhost:8787/knowledge/search?q=ollama"
+curl -s -X POST localhost:8787/agent/run \
+  -H 'content-type: application/json' -d '{"task":"summarise the README"}'
 ```
+
+### HTTP API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Provider reachability (the only unauthenticated route) |
+| `POST` | `/agent/run` | Start a run; `202` + `runId` (`?wait=1` for inline) |
+| `POST` | `/agent/cancel` | Abort a run by `runId` |
+| `GET` | `/runs/:id` | Run status and result |
+| `GET` | `/tasks/:id` | A persisted task record |
+| `GET` | `/knowledge/search?q=` | Knowledge search with provenance |
+
+The API binds to loopback by default and **refuses to start** on a non-loopback
+address unless `AURORA_API_TOKEN` is set. Because an HTTP request has no terminal,
+an HTTP run gets a **deny-all confirmation gate** by default, so a state-changing
+tool is refused; set `AURORA_API_ALLOW_MUTATION=true` (or `serve
+--allow-mutation`) to opt in. See `docs/adr/011`.
 
 If the configured provider is unreachable, the CLI exits non-zero with a
 specific message. It never reports a mock or an empty answer as success.
@@ -131,6 +164,13 @@ a tool call whose arguments exceed `AURORA_MAX_ARGUMENT_BYTES` is refused. Set
 `aurora run --no-confirm` for unattended use. Redaction covers operator-visible
 surfaces, not the model's observations — a file containing a key stays readable,
 so a session can inspect it deliberately.
+
+Phase 9 exposes the runtime over HTTP (`docs/adr/011`). The API is
+**read/research-shaped by default**: it binds to loopback, refuses to start on a
+public address without a token, and runs with a deny-all confirmation gate unless
+`AURORA_API_ALLOW_MUTATION=true` is set deliberately. Requests are
+rate-limited per client, the body is capped while streaming, and concurrency is
+bounded, so a caller cannot turn the agent into an unbounded queue.
 
 ## Adding knowledge for future sessions
 

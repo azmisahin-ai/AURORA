@@ -81,6 +81,7 @@ src/providers/   LLM/web/execution adapters implementing owned interfaces
 src/tools/       tool registry and tools (Phase 2: read/write/list/run_command, Phase 4: run_tests, Phase 5: delegate)
 src/security/    permissions, path/command validation (later: url, redaction)
 src/cli/         commander entry point
+src/api/         HTTP API over injected ports (Phase 9, ADR 011)
 docs/research/   sourced research notes
 docs/adr/        architecture decision records
 knowledge/       runtime knowledge store (gitignored contents)
@@ -352,6 +353,48 @@ CLI: `run --confirm | --no-confirm | --confirm-strict`.
 **Open, tagged DOĞRULANACAK:** selective observation redaction (redact
 `run_command` output but not `read_file`) is plausible but not designed; done
 badly it breaks tool use. Rate limits are in-process and reset on restart.
+
+## HTTP API (Phase 9, ADR 011)
+
+`src/api` is a peer of `cli`: it depends on `core` through a **narrow port** and
+on `security`; `core` never imports it. The framework is Node's built-in
+`node:http` — the research (ADR 011) is cited, and the decision is that five
+routes do not justify a web framework's dependency surface. Revisit if the route
+count grows or runtime portability becomes a goal.
+
+- **Ports, not providers.** `createApiServer` takes `RuntimePort` (`runTask`,
+  `health`), a `FileTaskStore`, a `FileKnowledgeStore`, and optional logger /
+  `SecretRedactor`. `AgentRuntime` satisfies `RuntimePort` structurally. Tests
+  pass a scripted fake, which is why `tests/integration/api.test.ts` needs **no
+  Ollama**.
+- **Runs are async by default.** `POST /agent/run` → `202` + `runId`;
+  `GET /runs/:id`; `POST /agent/cancel` aborts via `AbortController`. `?wait=1`
+  runs inline, bounded by `AURORA_API_MAX_SYNC_MS` (answers `202`, never hangs).
+- **Trust model.** Loopback default; `assertSafeBinding` **refuses a
+  non-loopback bind without a token** at startup. Bearer auth via
+  `tokenMatches` (sha256 + `timingSafeEqual`, so length does not leak).
+  `/health` is the only unauthenticated route. Body cap enforced *while
+  streaming*; per-client rate limit reuses `KeyedRateLimiter`.
+- **Fail closed on mutation.** `apiConfirmationGate(allowMutation)` returns
+  `AllowAllGate` only when opted in, else `DenyAllGate`. Default is deny, because
+  an HTTP request has no terminal to confirm a state-changing tool. This is the
+  Phase 8 gate port being reused, not a second policy.
+- **Responses are scrubbed.** A provider error surfaced over HTTP — thrown *or*
+  carried in an `error`-status result — passes through `SecretRedactor`; log
+  redaction does not reach a response body.
+- **Runs are not persisted** (deliberate): a half-executed command is not
+  resumable; durable work is Phase 6 `tasks`.
+
+Env: `AURORA_API_HOST` (127.0.0.1), `AURORA_API_PORT` (8787; 0 = ephemeral),
+`AURORA_API_TOKEN` (empty), `AURORA_API_ALLOW_MUTATION` (false),
+`AURORA_API_MAX_BODY_BYTES` (256 KiB), `AURORA_API_RATE_LIMIT` /
+`AURORA_API_RATE_REFILL` (60 / 1; 0 disables), `AURORA_API_MAX_CONCURRENT_RUNS`
+(2), `AURORA_API_MAX_SYNC_MS` (30000). CLI: `aurora serve
+[--host --port --allow-mutation]`.
+
+**Open, tagged DOĞRULANACAK:** there is no TLS termination in-process — a
+non-loopback deployment is expected to sit behind a reverse proxy. Multi-tenant
+authz (per-token scopes) is not designed; the token is a single shared secret.
 
 ## Test harness note
 

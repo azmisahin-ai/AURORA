@@ -14,3 +14,5 @@ knowledge/research/*
 !knowledge/**/.gitkeep
 tasks/*
 !tasks/.gitkeep
+sessions/*
+!sessions/.gitkeep
