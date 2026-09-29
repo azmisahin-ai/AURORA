@@ -473,6 +473,13 @@ Two production issues were found and fixed during this verification:
    for a successful `knowledge_write` and exits non-zero with a specific message
    when the topic was not persisted. Guarded by the `didPersistFinding` test in
    `tests/unit/cli.test.ts`.
+3. **The UI rendered a trajectory step as `[object Object]`.** Found by driving
+   the operator UI in a real browser; `panels.js` interpolated `entry.step` (an
+   object) into a template. Fixed by `formatStep` in `ui/lib/format.js`
+   (`kind toolName · rationale`), guarded by the `[object Object]` regression in
+   `tests/unit/ui/format.test.ts`. The UI's own note said `app.js` had no
+   automated test — this is exactly the gap that leaves; the panels are tested,
+   the event wiring still is not (tagged DOĞRULANACAK in ADR 012).
 
 **Model capability is the dominant reliability variable** (measured, not
 asserted): `llama3.2:1b` emits malformed/nested tool calls, omits required
