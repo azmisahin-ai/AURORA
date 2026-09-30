@@ -634,3 +634,12 @@ mutasyonunu tam kosuda yakalamadi. Baglantilar artik monoton kimlik tasiyor
 
 Suite: **64 dosya, 609 test → 604 passed, 5 skipped**; TSC-OK. M0 artik ✅;
 su anki odak M1 (model-agnostic hardening & config truth).
+
+**2026-09-29 — production readiness analizi.** `docs/production-readiness.md`
+eklendi: projenin nerede kaldigi, production icin kalan isler (P0/P1/P2) ve iki
+bitis cizgisi. Olculen gercekler: CI YOK (.github/workflows yok), LICENSE YOK,
+git tag YOK, Docker YOK; build gecer, npm audit 0, suite 604 passed / 5 skipped
+(Ollama bu hostta yok). Provider health kapisi VAR (run/research/tasks run),
+ama MODEL dogrulamasi YOK — varsayilan llama3.2 cekili degilse run ortasinda
+patlar (13.3 hala acik). Oneri: once Cizgi A (CI + model dogrulama + doctor +
+LICENSE + eval smoke + release), sonra M2-M7. En kritik tek eksik: CI + eval.

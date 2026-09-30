@@ -530,3 +530,26 @@ The goal is reached when all of the following hold, each with a test:
 
 > Same rule as the phases: no milestone is advanced until the previous
 > milestone's acceptance criteria are met and its tests pass.
+
+---
+
+## Production readiness — what is actually missing
+
+The milestones above describe *capabilities*. They do not describe the
+*assurance* layer a production system needs. `docs/production-readiness.md`
+measures both, with evidence, and splits the remaining work into two finish
+lines:
+
+- **Line A — "use it safely today" (P0):** CI, model reachability validation,
+  `aurora doctor`, a LICENSE, a release tag, and an eval smoke suite. None of
+  this changes the core; it adds the guarantees and packaging that are missing.
+- **Line B — the stated goal (P1, = M1–M7):** MCP, RAG, the other architectures,
+  parallelism, isolation, metrics.
+
+**Recommended order: Line A first.** A trusted base (CI catches regressions,
+eval catches model drift, packaging is legal and versioned) is what makes adding
+M2–M7 safe. Adding MCP or RAG on top of a system whose breakage nobody notices
+is how a working core quietly becomes an unmaintainable one.
+
+The single most important gap is **CI + eval**: everything else's reliability
+depends on being told when it breaks.
